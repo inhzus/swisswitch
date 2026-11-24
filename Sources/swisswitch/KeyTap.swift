@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CoreGraphics
 import os
 import SwisswitchCore
@@ -16,6 +17,7 @@ final class KeyTap {
     private let onLetter: (Character) -> Void
     private let onHold: (Bool) -> Void
     private var context: TapContext?
+    private var layoutMap: KeyboardLayoutMap?
     private var holdTimer: Task<Void, Never>?
     private var holding = false
     private let assignedDigits: OSAllocatedUnfairLock<Set<Character>>
@@ -34,7 +36,9 @@ final class KeyTap {
     /// Installs the tap. Fails when the process lacks Accessibility access.
     func start() -> Bool {
         guard context == nil else { return true }
-        let context = TapContext(assignedDigits: assignedDigits) { [weak self] signal in
+        let layoutMap = KeyboardLayoutMap()
+        let context = TapContext(assignedDigits: assignedDigits,
+                                 layout: layoutMap.table) { [weak self] signal in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.receive(signal) }
             }
@@ -55,6 +59,7 @@ final class KeyTap {
         thread.qualityOfService = .userInteractive
         thread.start()
         self.context = context
+        self.layoutMap = layoutMap
         return true
     }
 
@@ -117,11 +122,14 @@ private final class TapContext: @unchecked Sendable {
     /// Set once before the tap thread starts, read only afterwards.
     var port: CFMachPort?
     let assignedDigits: OSAllocatedUnfairLock<Set<Character>>
+    let layout: OSAllocatedUnfairLock<[UInt16: Character]>
     let deliver: @Sendable (TapSignal) -> Void
 
     init(assignedDigits: OSAllocatedUnfairLock<Set<Character>>,
+         layout: OSAllocatedUnfairLock<[UInt16: Character]>,
          deliver: @escaping @Sendable (TapSignal) -> Void) {
         self.assignedDigits = assignedDigits
+        self.layout = layout
         self.deliver = deliver
     }
 }
@@ -151,18 +159,79 @@ private let otherModifiers: CGEventFlags = [.maskShift, .maskAlternate, .maskCon
 
 /// The lowercase a–z letter or 0–9 digit when `event` is Right ⌘ + that key
 /// with no other modifiers.
-private func triggerKey(of event: CGEvent) -> Character? {
+///
+/// Runs on the tap thread, so it must not touch AppKit or Text Input Sources
+/// (`NSEvent.charactersIgnoringModifiers` asserts the main queue and traps);
+/// the character comes from the table `KeyboardLayoutMap` builds on main.
+private func triggerKey(of event: CGEvent,
+                        layout: OSAllocatedUnfairLock<[UInt16: Character]>) -> Character? {
     let flags = event.flags
     guard flags.contains(.maskCommand),
           flags.rawValue & rightCommandMask != 0,
-          flags.isDisjoint(with: otherModifiers),
-          // Layout-aware: the character this key types without modifiers.
-          let chars = NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased(),
-          chars.count == 1,
-          let char = chars.first,
-          char.isASCII, char.isLetter || char.isNumber
+          flags.isDisjoint(with: otherModifiers)
     else { return nil }
-    return char
+    let code = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
+    return layout.withLock { $0[code] }
+}
+
+/// Keycode → lowercase ASCII letter/digit for the current keyboard layout:
+/// the character each key types with no modifiers. Built on the main thread
+/// (TIS requires it) and rebuilt whenever the input source changes; the tap
+/// thread only reads `table`.
+@MainActor
+final class KeyboardLayoutMap {
+    nonisolated let table = OSAllocatedUnfairLock<[UInt16: Character]>(initialState: [:])
+    private var observer: NSObjectProtocol?
+
+    init() {
+        rebuild()
+        observer = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rebuild() }
+        }
+    }
+
+    func rebuild() {
+        let map = Self.currentMap()
+        table.withLock { $0 = map }
+    }
+
+    private static func layoutData(_ source: TISInputSource?) -> CFData? {
+        guard let source,
+              let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return nil }
+        return Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue()
+    }
+
+    private static func currentMap() -> [UInt16: Character] {
+        // Input methods (e.g. Chinese) have no layout data; fall back to the
+        // ASCII-capable layout they type through.
+        let data = layoutData(TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue())
+            ?? layoutData(TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue())
+        guard let data, let bytes = CFDataGetBytePtr(data) else { return [:] }
+        let keyboardType = UInt32(LMGetKbdType())
+        var map: [UInt16: Character] = [:]
+        bytes.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { layout in
+            for code in UInt16(0)..<128 {
+                var deadKeyState: UInt32 = 0
+                var length = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                let status = UCKeyTranslate(
+                    layout, code, UInt16(kUCKeyActionDown), 0, keyboardType,
+                    OptionBits(kUCKeyTranslateNoDeadKeysMask), &deadKeyState,
+                    chars.count, &length, &chars)
+                guard status == noErr, length > 0 else { continue }
+                let string = String(utf16CodeUnits: chars, count: length).lowercased()
+                guard string.count == 1, let char = string.first,
+                      char.isASCII, char.isLetter || char.isNumber
+                else { continue }
+                map[code] = char
+            }
+        }
+        return map
+    }
 }
 
 /// Runs on the tap thread: classify, hand off, and return immediately.
@@ -189,7 +258,7 @@ private func keyTapCallback(
         return pass
     case .keyDown:
         // Unassigned digits pass through, so apps keep their ⌘1…⌘9 shortcuts.
-        guard let letter = triggerKey(of: event),
+        guard let letter = triggerKey(of: event, layout: context.layout),
               letter.isLetter || context.assignedDigits.withLock({ $0.contains(letter) })
         else {
             context.deliver(.keyDown(letter: nil))
