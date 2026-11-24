@@ -1,10 +1,19 @@
 import AppKit
+import SwisswitchCore
 
 @MainActor
 final class AppController {
     private let hud = SwitchHUD()
     private let preview = AppPreview()
     private let usage = UsageStore()
+    private let keys = KeyAssignmentStore()
+    private let settings = AppSettings()
+    private lazy var settingsWindow = SettingsWindow(
+        keys: keys, settings: settings,
+        onResetUsage: { [weak self] in
+            self?.usage.reset()
+            self?.log("learned preferences reset")
+        })
     private var statusMenu: StatusMenu?
     private var tap: KeyTap?
     private var onboarding: OnboardingWindow?
@@ -18,10 +27,7 @@ final class AppController {
     func start() {
         statusMenu = StatusMenu(
             onShowApps: { [weak self] in self?.showPreview(autoHide: .seconds(3)) },
-            onReset: { [weak self] in
-                self?.usage.reset()
-                self?.log("learned preferences reset")
-            })
+            onSettings: { [weak self] in self?.settingsWindow.show() })
         usage.start()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -40,7 +46,7 @@ final class AppController {
     }
 
     /// Debug only: with SWISSWITCH_DEBUG_LETTER_FILE set, `kill -USR1 <pid>` switches
-    /// using the letter in that file, or shows/hides the preview when the file
+    /// using the letter or digit in that file, or shows/hides the preview when the file
     /// says `preview`/`release`. Synthetic keys from automation tools are often
     /// posted straight to a process and never reach the session event tap.
     private func installDebugTrigger() {
@@ -55,8 +61,7 @@ final class AppController {
                 case "release": self?.preview.hide(); return
                 default: break
                 }
-                guard let letter = text.lowercased().first(where: { $0.isASCII && $0.isLetter })
-                else { return }
+                guard let letter = text.lazy.compactMap(triggerKey(for:)).first else { return }
                 self?.switchTo(letter)
             }
         }
@@ -67,31 +72,37 @@ final class AppController {
 
     private func startTap() {
         let tap = KeyTap(
+            assignedDigits: keys.assignedDigits,
+            holdDelay: { [weak self] in self?.settings.holdDelay ?? .seconds(1) },
             onLetter: { [weak self] letter in self?.switchTo(letter) },
             onHold: { [weak self] down in
-                if down { self?.showPreview() } else { self?.preview.hide() }
+                guard let self else { return }
+                if down { if self.settings.previewEnabled { self.showPreview() } }
+                else { self.preview.hide() }
             })
         guard tap.start() else {
             log("could not create the event tap; is Accessibility access granted?")
             exit(1)
         }
         self.tap = tap
-        log("running; press Right ⌘ + a letter, hold Right ⌘ to preview (quit from the menu bar)")
+        log("running; press Right ⌘ + a letter or digit, hold Right ⌘ to preview (quit from the menu bar)")
     }
 
     private func showPreview(autoHide: Duration? = nil) {
         hud.hide()
-        preview.show(AppActivator.switchableApps(usage: usage), autoHide: autoHide)
+        preview.show(AppActivator.switchableApps(usage: usage, keys: keys), autoHide: autoHide)
     }
 
     private func switchTo(_ letter: Character) {
         preview.hide()
-        if let app = AppActivator.activate(letter: letter, usage: usage) {
+        if let app = AppActivator.activate(key: letter, usage: usage, keys: keys) {
             log("\(letter) → \(app.localizedName ?? "?")")
-            hud.show(.app(name: app.localizedName ?? "", icon: app.icon, letter: letter))
+            if settings.showHUD {
+                hud.show(.app(name: app.localizedName ?? "", icon: app.icon, letter: letter))
+            }
         } else {
             log("\(letter) → no running app")
-            hud.show(.noMatch(letter: letter))
+            if settings.showHUD { hud.show(.noMatch(letter: letter)) }
         }
     }
 

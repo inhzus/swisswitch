@@ -1,16 +1,15 @@
 import AppKit
 
-/// The menu-bar item: preview, permission status, reset and Quit.
+/// The menu-bar item: preview, settings and Quit.
 @MainActor
-final class StatusMenu: NSObject, NSMenuDelegate {
+final class StatusMenu: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let accessItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let onShowApps: () -> Void
-    private let onReset: () -> Void
+    private let onSettings: () -> Void
 
-    init(onShowApps: @escaping () -> Void, onReset: @escaping () -> Void) {
+    init(onShowApps: @escaping () -> Void, onSettings: @escaping () -> Void) {
         self.onShowApps = onShowApps
-        self.onReset = onReset
+        self.onSettings = onSettings
         super.init()
 
         let image = NSImage(systemSymbolName: "command", accessibilityDescription: "swisswitch")
@@ -19,26 +18,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.button?.toolTip = "swisswitch"
 
         let menu = NSMenu()
-        menu.delegate = self
         menu.addItem(withTitle: "Show Apps", action: #selector(showApps), keyEquivalent: "").target = self
-        accessItem.isEnabled = false
-        menu.addItem(accessItem)
-        menu.addItem(withTitle: "Reset Learned Preferences", action: #selector(reset), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Settings…", action: #selector(settings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit swisswitch", action: #selector(quit), keyEquivalent: "q").target = self
         item.menu = menu
-        updateAccess()
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        updateAccess()
-    }
-
-    private func updateAccess() {
-        accessItem.title = AXIsProcessTrusted() ? "Accessibility: Granted" : "Accessibility: Not granted"
     }
 
     @objc private func showApps() { onShowApps() }
-    @objc private func reset() { onReset() }
+    @objc private func settings() { onSettings() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

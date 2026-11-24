@@ -7,11 +7,11 @@ struct SwitchableApp {
     let candidate: AppCandidate
 }
 
-/// Finds the running app for a letter and brings it to the front. Never launches apps.
+/// Finds the running app for a key and brings it to the front. Never launches apps.
 @MainActor
 enum AppActivator {
-    /// Regular running apps, scored by learned preference.
-    static func switchableApps(usage: UsageStore) -> [SwitchableApp] {
+    /// Regular running apps, scored by learned preference, with their key assignments.
+    static func switchableApps(usage: UsageStore, keys: KeyAssignmentStore) -> [SwitchableApp] {
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         return NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && $0.localizedName != nil && !$0.isTerminated }
@@ -19,13 +19,14 @@ enum AppActivator {
                 SwitchableApp(app: app, candidate: AppCandidate(
                     name: app.localizedName!, id: UsageStore.id(of: app), aliases: aliases(of: app),
                     pid: app.processIdentifier, isFrontmost: app.processIdentifier == frontPID,
-                    score: usage.score(of: app)))
+                    score: usage.score(of: app),
+                    assignment: keys.assignment(for: UsageStore.id(of: app))))
             }
     }
 
-    static func activate(letter: Character, usage: UsageStore) -> NSRunningApplication? {
-        let apps = switchableApps(usage: usage)
-        guard let pick = pickApp(for: letter, among: apps.map(\.candidate)),
+    static func activate(key: Character, usage: UsageStore, keys: KeyAssignmentStore) -> NSRunningApplication? {
+        let apps = switchableApps(usage: usage, keys: keys)
+        guard let pick = pickApp(for: key, among: apps.map(\.candidate)),
               let app = apps.first(where: { $0.candidate.pid == pick.pid })?.app
         else { return nil }
 
@@ -47,7 +48,10 @@ enum AppActivator {
     /// so an app gets a single letter: CFBundleName ("Feishu") wins over the
     /// bundle file name ("Lark.app").
     private static func aliases(of app: NSRunningApplication) -> [String] {
-        guard let url = app.bundleURL else { return [] }
+        app.bundleURL.map(aliases(ofBundleAt:)) ?? []
+    }
+
+    static func aliases(ofBundleAt url: URL) -> [String] {
         let bundleName = Bundle(url: url)?.infoDictionary?["CFBundleName"] as? String
         return [bundleName ?? url.deletingPathExtension().lastPathComponent]
     }

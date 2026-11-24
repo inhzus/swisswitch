@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import SwisswitchCore
 
-/// Liquid Glass overlay listing every switchable app, grouped by letter, in the
-/// order Right ⌘ + letter visits them. Shown while Right ⌘ is held.
+/// Liquid Glass overlay listing every switchable app, grouped by key, in the
+/// order Right ⌘ + key visits them. Shown while Right ⌘ is held.
 @MainActor
 final class AppPreview {
     struct Tile: Identifiable {
@@ -84,7 +84,7 @@ private struct PreviewView: View {
             if let tiles = model.tiles {
                 GlassEffectContainer(spacing: 12) {
                     VStack(spacing: 18) {
-                        Text(tiles.isEmpty ? "No running apps" : "Right ⌘ + letter")
+                        Text(tiles.isEmpty ? "No running apps" : "Right ⌘ + key")
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 16)

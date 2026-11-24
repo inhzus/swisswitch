@@ -87,3 +87,43 @@ private func scored(_ name: String, _ pid: pid_t, _ score: Double, front: Bool =
     #expect(AppCandidate(name: "Safari", pid: 1, isFrontmost: false).id == "Safari")
     #expect(AppCandidate(name: "Safari", id: "com.apple.Safari", pid: 1, isFrontmost: false).id == "com.apple.Safari")
 }
+
+private func assigned(_ name: String, _ pid: pid_t, _ assignment: KeyAssignment,
+                      score: Double = 0, front: Bool = false) -> AppCandidate {
+    AppCandidate(name: name, pid: pid, isFrontmost: front, score: score, assignment: assignment)
+}
+
+@Test func customKeyReplacesDefault() {
+    let apps = [assigned("Safari", 1, .key("b"))]
+    #expect(pickApp(for: "b", among: apps)?.pid == 1)
+    #expect(pickApp(for: "s", among: apps) == nil)
+    #expect(apps[0].defaultKey == "s")
+}
+
+@Test func noneMatchesNothing() {
+    let apps = [assigned("Safari", 1, .none)]
+    #expect(triggerKeys.allSatisfy { pickApp(for: $0, among: apps) == nil })
+}
+
+@Test func digitAssignment() {
+    let apps = [assigned("Safari", 1, .key("1")), app("Terminal", 2)]
+    #expect(pickApp(for: "1", among: apps)?.pid == 1)
+    #expect(pickApp(for: "2", among: apps) == nil)
+}
+
+@Test func customKeySharedWithDefaultCycles() {
+    let apps = [assigned("Mail", 1, .key("s"), score: 1), scored("Safari", 2, 5, front: true)]
+    #expect(pickApp(for: "s", among: apps)?.pid == 1)
+}
+
+@Test func digitGroupsFollowLetters() {
+    let apps = [assigned("Safari", 1, .key("3")), app("Notes", 2), assigned("Mail", 3, .key("0"))]
+    #expect(groupedApps(apps).map(\.letter) == ["n", "0", "3"])
+}
+
+@Test func validTriggerKeys() {
+    #expect(triggerKey(for: "A") == "a")
+    #expect(triggerKey(for: "7") == "7")
+    #expect(triggerKey(for: "-") == nil)
+    #expect(triggerKey(for: "é") == "e")
+}
