@@ -67,13 +67,19 @@ repository secrets are optional, and each one turns on a step:
 | `NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID` | Notarization with an App Store Connect API key (contents of the `.p8`); needs a Developer ID identity |
 | `TAP_DEPLOY_KEY` | Pushing the updated cask to [`inhzus/homebrew-tap`](https://github.com/inhzus/homebrew-tap) (the private half of a deploy key with write access there) |
 
-Without a signing secret, releases are signed ad-hoc and users have to grant Accessibility
-again after every upgrade. A Developer ID certificate fixes that, and so does the
-"swisswitch Dev" identity. To use the latter, export it from Keychain Access (select the
-certificate, then File → Export Items as `.p12`), and set the secrets:
+Releases are signed with a self-signed **"Swisswitch Release"** certificate (valid until
+2046), stored in the `MACOS_CERT_*` secrets, with a backup in the maintainer's login keychain.
+macOS ties the Accessibility grant to the bundle ID plus this certificate, so the grant
+survives upgrades. **Don't replace the certificate:** a new one, or a release without
+the secrets (signed ad-hoc), makes every user grant Accessibility again.
+
+To sign a local build the way releases are signed, run
+`SWISSWITCH_SIGN_IDENTITY="Swisswitch Release" scripts/bundle.sh`. To restore the secrets
+from the backup, export the certificate from Keychain Access (File → Export Items as
+`.p12`), then:
 
 ```sh
-base64 -i swisswitch.p12 | gh secret set MACOS_CERT_P12
+base64 -i swisswitch-release.p12 | gh secret set MACOS_CERT_P12
 gh secret set MACOS_CERT_PASSWORD   # the export password
 ```
 
