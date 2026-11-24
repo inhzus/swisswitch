@@ -50,6 +50,12 @@ private func app(_ name: String, _ pid: pid_t, aliases: [String] = [], front: Bo
     #expect(pickApp(for: "c", among: apps) == nil)
 }
 
+@Test func onlyFirstAliasCounts() {
+    let apps = [app("飞书", 1, aliases: ["Feishu", "Lark"])]
+    #expect(pickApp(for: "f", among: apps)?.pid == 1)
+    #expect(pickApp(for: "l", among: apps) == nil)
+}
+
 private func scored(_ name: String, _ pid: pid_t, _ score: Double, front: Bool = false) -> AppCandidate {
     AppCandidate(name: name, pid: pid, isFrontmost: front, score: score)
 }

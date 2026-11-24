@@ -43,13 +43,12 @@ enum AppActivator {
         return app
     }
 
-    /// Non-localized names, so "访达" is still reachable as Finder.
+    /// The non-localized name, so "访达" is still reachable as Finder. Only one,
+    /// so an app gets a single letter: CFBundleName ("Feishu") wins over the
+    /// bundle file name ("Lark.app").
     private static func aliases(of app: NSRunningApplication) -> [String] {
         guard let url = app.bundleURL else { return [] }
-        var names = [url.deletingPathExtension().lastPathComponent]
-        if let name = Bundle(url: url)?.infoDictionary?["CFBundleName"] as? String {
-            names.append(name)
-        }
-        return names
+        let bundleName = Bundle(url: url)?.infoDictionary?["CFBundleName"] as? String
+        return [bundleName ?? url.deletingPathExtension().lastPathComponent]
     }
 }

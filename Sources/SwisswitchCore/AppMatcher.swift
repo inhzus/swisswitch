@@ -6,7 +6,8 @@ public struct AppCandidate: Equatable, Sendable {
     public let name: String
     /// Stable identity for usage stats (bundle ID, or the name as a fallback).
     public let id: String
-    /// Extra names to match on, e.g. the non-localized "Finder" for "访达".
+    /// Fallback names for a non-Latin display name, e.g. "Finder" for "访达".
+    /// Only the first is matched on.
     public let aliases: [String]
     public let pid: pid_t
     public let isFrontmost: Bool
@@ -23,12 +24,13 @@ public struct AppCandidate: Equatable, Sendable {
         self.score = score
     }
 
-    /// Aliases only count when the name itself has no a–z initial (e.g. "访达"),
-    /// so an app like "Google Chrome" isn't also reachable through "Chrome".
+    /// Each app answers to exactly one letter: its name's initial if that is a–z,
+    /// otherwise the first alias's (e.g. "访达" → Finder). So "Google Chrome" isn't
+    /// also reachable through "Chrome", nor "飞书" through both Feishu and Lark.
     func matches(_ key: Character) -> Bool {
         guard let first = initial(of: name) else { return false }
         if first.isASCII && first.isLetter { return first == key }
-        return aliases.contains { initial(of: $0) == key }
+        return aliases.first.flatMap(initial(of:)) == key
     }
 }
 
