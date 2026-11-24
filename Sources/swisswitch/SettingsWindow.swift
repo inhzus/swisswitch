@@ -22,16 +22,20 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     func show() {
-        let window = self.window ?? makeWindow()
-        model.reload()
-        model.accessibilityGranted = AXIsProcessTrusted()
-        settings.refreshLogin()
-        if !window.isVisible {
-            window.center()
-            startObserving()
+        // Wait for the status menu to stop tracking; activating mid-tracking is often ignored.
+        DispatchQueue.main.async { [self] in
+            let window = self.window ?? makeWindow()
+            model.reload()
+            model.accessibilityGranted = AXIsProcessTrusted()
+            settings.refreshLogin()
+            if !window.isVisible && !window.isMiniaturized { window.center() }
+            if monitor == nil { startObserving() }
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            // Cooperative `activate()` is often refused for an accessory app.
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         }
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -40,31 +44,29 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let tabs = NSTabViewController()
-        tabs.tabStyle = .toolbar
-        tabs.addTabViewItem(tab("General", symbol: "gearshape",
-                                GeneralView(settings: settings, model: model)
-                                    .frame(width: Self.width, height: 350)))
-        tabs.addTabViewItem(tab("Keys", symbol: "keyboard",
-                                KeysView(model: model).frame(width: Self.width, height: 560)))
-
-        let window = NSWindow(contentViewController: tabs)
+        let panes = SettingsPanes(panes: [
+            pane("General", symbol: "gearshape", height: 385, GeneralView(settings: settings, model: model)),
+            pane("Keys", symbol: "keyboard", height: 560, KeysView(model: model)),
+        ])
+        let window = NSWindow(contentViewController: panes)
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
         window.delegate = self
+        panes.install(in: window)
         self.window = window
         return window
     }
 
-    private func tab(_ title: String, symbol: String, _ view: some View) -> NSTabViewItem {
-        let controller = NSHostingController(rootView: view)
-        controller.sizingOptions = .preferredContentSize
-        controller.title = title
-        let item = NSTabViewItem(viewController: controller)
-        item.label = title
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        return item
+    private func pane(_ title: String, symbol: String, height: CGFloat,
+                      _ view: some View) -> SettingsPanes.Pane {
+        let controller = NSHostingController(rootView: view
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
+        controller.sizingOptions = []
+        return SettingsPanes.Pane(
+            id: NSToolbarItem.Identifier(title), title: title,
+            image: NSImage(systemSymbolName: symbol, accessibilityDescription: title),
+            size: NSSize(width: Self.width, height: height), controller: controller)
     }
 
     /// Keeps the app list in sync with launches and quits, and handles keys
@@ -98,6 +100,103 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             return true
         }
         return model.record(event)
+    }
+}
+
+/// Toolbar-tabbed panes, switched the way classic preference windows do it: the old
+/// pane leaves, the empty window animates to the new pane's size, then the new pane
+/// fades in. No pane is ever laid out, clipped or cross-faded mid-resize.
+@MainActor
+private final class SettingsPanes: NSViewController, NSToolbarDelegate {
+    struct Pane {
+        let id: NSToolbarItem.Identifier
+        let title: String
+        let image: NSImage?
+        let size: NSSize
+        let controller: NSViewController
+    }
+
+    private let panes: [Pane]
+    private var current: Pane?
+
+    init(panes: [Pane]) {
+        self.panes = panes
+        super.init(nibName: nil, bundle: nil)
+        panes.forEach { addChild($0.controller) }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        view = NSView(frame: NSRect(origin: .zero, size: panes[0].size))
+    }
+
+    func install(in window: NSWindow) {
+        let toolbar = NSToolbar(identifier: "SettingsToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar
+        select(panes[0], animated: false)
+    }
+
+    @objc private func toolbarItemClicked(_ sender: NSToolbarItem) {
+        guard let pane = panes.first(where: { $0.id == sender.itemIdentifier }) else { return }
+        select(pane, animated: true)
+    }
+
+    private func select(_ pane: Pane, animated: Bool) {
+        guard let window = view.window, pane.id != current?.id else { return }
+        current?.controller.view.removeFromSuperview()
+        current = pane
+        window.toolbar?.selectedItemIdentifier = pane.id
+        window.title = pane.title
+
+        // Grow or shrink from the top edge, keeping the title bar in place.
+        let old = window.frame
+        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: pane.size))
+        frame.origin = NSPoint(x: old.minX, y: old.maxY - frame.height)
+        window.setFrame(frame, display: true, animate: animated && window.isVisible)
+
+        let content = pane.controller.view
+        content.frame = view.bounds
+        content.autoresizingMask = [.width, .height]
+        view.addSubview(content)
+        if animated && window.isVisible {
+            content.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                content.animator().alphaValue = 1
+            }
+        } else {
+            content.alphaValue = 1
+        }
+    }
+
+    // MARK: NSToolbarDelegate
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        panes.map(\.id)
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        panes.map(\.id)
+    }
+
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        panes.map(\.id)
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let pane = panes.first(where: { $0.id == id }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = pane.title
+        item.image = pane.image
+        item.target = self
+        item.action = #selector(toolbarItemClicked(_:))
+        return item
     }
 }
 
@@ -303,17 +402,35 @@ private struct KeysView: View {
 
     var body: some View {
         let rows = model.filteredRows
+        // The header sits above the scroll view (not as a safe-area inset), so the list
+        // scrolls only beneath its own top edge and never shows through the header.
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                TextField("Search", text: $model.search, prompt: Text("Search apps"))
-                    .textFieldStyle(.roundedBorder)
-                Button("Add App…", systemImage: "plus") { model.addApp() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .help("Add an app that isn't running")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("Search", text: $model.search, prompt: Text("Search apps"))
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add App…", systemImage: "plus") { model.addApp() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Add an app that isn't running")
+                }
+                HStack(alignment: .firstTextBaseline) {
+                    Text(model.recording != nil
+                         ? "Press a letter or digit · ⌫ No key · esc Cancel"
+                         : "Right ⌘ + key switches apps. Apps sharing a key take turns.")
+                        .font(.callout)
+                        .foregroundStyle(model.recording != nil ? Color.accentColor : .secondary)
+                    Spacer()
+                    Button("Reset All…") { model.confirmResetKeys = true }
+                        .controlSize(.small)
+                        .disabled(model.keys.entries.isEmpty)
+                }
             }
             .padding(.horizontal, 22)
             .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            Divider()
 
             Form {
                 Section {
@@ -322,17 +439,6 @@ private struct KeysView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(rows) { KeyRow(model: model, row: $0) }
-                } footer: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(model.recording != nil
-                             ? "Press a letter or digit · ⌫ No key · esc Cancel"
-                             : "Right ⌘ + key switches apps. Apps sharing a key take turns.")
-                            .foregroundStyle(model.recording != nil ? Color.accentColor : .secondary)
-                        Spacer()
-                        Button("Reset All…") { model.confirmResetKeys = true }
-                            .controlSize(.small)
-                            .disabled(model.keys.entries.isEmpty)
-                    }
                 }
             }
             .formStyle(.grouped)
