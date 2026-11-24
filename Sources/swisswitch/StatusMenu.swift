@@ -12,9 +12,7 @@ final class StatusMenu: NSObject {
         self.onSettings = onSettings
         super.init()
 
-        let image = NSImage(systemSymbolName: "command", accessibilityDescription: "swisswitch")
-        image?.isTemplate = true
-        item.button?.image = image
+        item.button?.image = MenuBarIcon.image()
         item.button?.toolTip = "swisswitch"
 
         let menu = NSMenu()

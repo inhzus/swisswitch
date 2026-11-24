@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="swisswitch icon"></p>
+
 # swisswitch
 
 Switch apps on macOS with **Right ⌘ + a letter**.
@@ -52,6 +54,7 @@ Requires **macOS 27** or later. Only the Xcode Command Line Tools are needed; fu
 swift run swisswitch          # run from the terminal (quit from the menu bar or Ctrl-C)
 ./scripts/test.sh             # run the tests
 ./scripts/bundle.sh           # build build/Swisswitch.app (LSUIElement, no Dock icon)
+swift scripts/make-icon.swift # regenerate Resources/AppIcon.icns and docs/icon.png
 ```
 
 `scripts/test.sh` exists because the Command Line Tools keep the Swift Testing macro plugin in a folder SwiftPM doesn't search by default.
