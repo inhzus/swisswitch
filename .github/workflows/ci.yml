@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # swisswitch targets macOS 27, which needs the Xcode 27 image (arm64, macOS 27).
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the build number is the commit count
+      - run: swift --version
+      - name: Test
+        run: scripts/test.sh
+      - name: Bundle
+        run: scripts/bundle.sh
+      - name: Check architecture
+        run: |
+          archs="$(lipo -archs build/Swisswitch.app/Contents/MacOS/swisswitch)"
+          echo "$archs"
+          [[ "$archs" == *arm64* ]]

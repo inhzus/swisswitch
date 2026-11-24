@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: xcode-27
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the build number is the commit count
+
+      - name: Set version
+        run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: scripts/test.sh
+
+      # Optional: without these secrets the build is ad-hoc signed, and users have to grant
+      # Accessibility again after every upgrade. Any code-signing identity works: a
+      # Developer ID certificate, or the self-signed "swisswitch Dev" one from
+      # scripts/make-cert.sh, which keeps the grant stable across releases.
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # No -v: a self-signed identity isn't trusted, so -v would hide it, yet codesign
+          # can still sign with it.
+          IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | grep -o '"[^"]*"' | head -1 | tr -d '"')"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::No code-signing identity in MACOS_CERT_P12"
+            exit 1
+          fi
+          echo "Signing as $IDENTITY"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      # Notarization needs a Developer ID identity.
+      - name: Set up notarization
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        if: env.NOTARY_KEY != '' && startsWith(env.SIGN_IDENTITY, 'Developer ID')
+        run: |
+          echo "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          {
+            echo "NOTARY_KEY=$RUNNER_TEMP/notary.p8"
+            echo "NOTARY_KEY_ID=$NOTARY_KEY_ID"
+            echo "NOTARY_ISSUER_ID=$NOTARY_ISSUER_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Package
+        run: scripts/package.sh
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "build/Swisswitch-$VERSION.zip" --title "Swisswitch $VERSION" --generate-notes
+
+      - name: Update Homebrew tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          if [[ -z "$TAP_DEPLOY_KEY" ]]; then
+            echo "::notice::TAP_DEPLOY_KEY not set; skipping the Homebrew tap update."
+            exit 0
+          fi
+          SHA="$(shasum -a 256 "build/Swisswitch-$VERSION.zip" | cut -d' ' -f1)"
+          # A deploy key with write access to the tap repo only.
+          install -m 600 /dev/null "$RUNNER_TEMP/tap_key"
+          echo "$TAP_DEPLOY_KEY" > "$RUNNER_TEMP/tap_key"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/tap_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:inhzus/homebrew-tap.git "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Casks"
+          sed -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+              -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" \
+              packaging/homebrew/swisswitch.rb > "$RUNNER_TEMP/tap/Casks/swisswitch.rb"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/swisswitch.rb
+          git commit -m "swisswitch $VERSION"
+          git push
