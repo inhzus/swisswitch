@@ -4,20 +4,31 @@ import Foundation
 public struct AppCandidate: Equatable, Sendable {
     /// Display name (usually localized), used for ordering.
     public let name: String
+    /// Stable identity for usage stats (bundle ID, or the name as a fallback).
+    public let id: String
     /// Extra names to match on, e.g. the non-localized "Finder" for "访达".
     public let aliases: [String]
     public let pid: pid_t
     public let isFrontmost: Bool
+    /// Learned preference; higher wins.
+    public let score: Double
 
-    public init(name: String, aliases: [String] = [], pid: pid_t, isFrontmost: Bool) {
+    public init(name: String, id: String? = nil, aliases: [String] = [], pid: pid_t,
+                isFrontmost: Bool, score: Double = 0) {
         self.name = name
+        self.id = id ?? name
         self.aliases = aliases
         self.pid = pid
         self.isFrontmost = isFrontmost
+        self.score = score
     }
 
+    /// Aliases only count when the name itself has no a–z initial (e.g. "访达"),
+    /// so an app like "Google Chrome" isn't also reachable through "Chrome".
     func matches(_ key: Character) -> Bool {
-        initial(of: name) == key || aliases.contains { initial(of: $0) == key }
+        guard let first = initial(of: name) else { return false }
+        if first.isASCII && first.isLetter { return first == key }
+        return aliases.contains { initial(of: $0) == key }
     }
 }
 
@@ -28,22 +39,38 @@ func initial(of name: String) -> Character? {
         .first
 }
 
+/// Orders apps the way presses visit them: highest score first, then by name.
+func preferenceOrder(_ a: AppCandidate, _ b: AppCandidate) -> Bool {
+    if a.score != b.score { return a.score > b.score }
+    let order = a.name.localizedStandardCompare(b.name)
+    return order == .orderedSame ? a.pid < b.pid : order == .orderedAscending
+}
+
+/// Apps matching `letter`, in press order.
+public func matches(for letter: Character, among candidates: [AppCandidate]) -> [AppCandidate] {
+    guard let key = initial(of: String(letter)) else { return [] }
+    return candidates.filter { $0.matches(key) }.sorted(by: preferenceOrder)
+}
+
 /// Picks the app to switch to for `letter`.
 ///
-/// Matches are ordered by name so repeated presses are predictable. If the
-/// frontmost app is one of the matches, the next match (wrapping around) is
-/// returned, so pressing the same letter cycles through apps sharing it.
+/// Matches are ordered by learned preference (then name), so one press goes to
+/// the app the user picks most. If the frontmost app is one of the matches, the
+/// next match (wrapping around) is returned, so repeated presses cycle.
 public func pickApp(for letter: Character, among candidates: [AppCandidate]) -> AppCandidate? {
-    guard let key = initial(of: String(letter)) else { return nil }
-    let matches = candidates
-        .filter { $0.matches(key) }
-        .sorted {
-            let order = $0.name.localizedStandardCompare($1.name)
-            return order == .orderedSame ? $0.pid < $1.pid : order == .orderedAscending
-        }
+    let matches = matches(for: letter, among: candidates)
     guard !matches.isEmpty else { return nil }
     if let current = matches.firstIndex(where: \.isFrontmost) {
         return matches[(current + 1) % matches.count]
     }
     return matches[0]
+}
+
+/// Every letter a–z that has apps, each with its apps in press order.
+/// An app can appear under several letters through its aliases.
+public func groupedApps(_ candidates: [AppCandidate]) -> [(letter: Character, apps: [AppCandidate])] {
+    "abcdefghijklmnopqrstuvwxyz".compactMap { letter in
+        let apps = matches(for: letter, among: candidates)
+        return apps.isEmpty ? nil : (letter, apps)
+    }
 }

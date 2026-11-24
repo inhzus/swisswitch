@@ -20,22 +20,10 @@ final class SwitchHUD {
     private var hideTask: Task<Void, Never>?
     /// How long the HUD stays up; SWISSWITCH_HUD_HOLD_MS overrides it for debugging.
     private let holdTime: Duration = .milliseconds(
-        ProcessInfo.processInfo.environment["SWISSWITCH_HUD_HOLD_MS"].flatMap(Int.init) ?? 750)
+        ProcessInfo.processInfo.environment["SWISSWITCH_HUD_HOLD_MS"].flatMap(Int.init) ?? 450)
 
     init() {
-        panel = HUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 140),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.level = .statusBar
-        panel.ignoresMouseEvents = true
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel = HUDPanel.make(size: NSSize(width: 560, height: 140))
         let host = NSHostingView(rootView: HUDView(model: model))
         host.sizingOptions = []
         panel.contentView = host
@@ -59,20 +47,48 @@ final class SwitchHUD {
         }
     }
 
+    /// Hides the HUD right away (e.g. when the preview takes over).
+    func hide() {
+        hideTask?.cancel()
+        model.content = nil
+        panel.orderOut(nil)
+    }
+
     /// Centers the panel a bit below the middle of the screen holding the pointer.
     private func position() {
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-        guard let frame = screen?.visibleFrame else { return }
+        guard let frame = HUDPanel.pointerScreen()?.visibleFrame else { return }
         let size = panel.frame.size
         panel.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2,
                                      y: frame.midY - frame.height * 0.18 - size.height / 2))
     }
 }
 
-private final class HUDPanel: NSPanel {
+/// A transparent, click-through overlay panel that never takes focus.
+final class HUDPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    static func make(size: NSSize) -> HUDPanel {
+        let panel = HUDPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .statusBar
+        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        return panel
+    }
+
+    static func pointerScreen() -> NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+    }
 }
 
 @Observable

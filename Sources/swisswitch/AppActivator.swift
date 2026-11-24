@@ -1,23 +1,35 @@
 import AppKit
 import SwisswitchCore
 
+/// A running app paired with its matcher candidate.
+struct SwitchableApp {
+    let app: NSRunningApplication
+    let candidate: AppCandidate
+}
+
 /// Finds the running app for a letter and brings it to the front. Never launches apps.
 @MainActor
 enum AppActivator {
-    static func activate(letter: Character) -> NSRunningApplication? {
+    /// Regular running apps, scored by learned preference.
+    static func switchableApps(usage: UsageStore) -> [SwitchableApp] {
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        let running = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy == .regular && $0.localizedName != nil && !$0.isTerminated
-        }
-        let candidates = running.map {
-            AppCandidate(name: $0.localizedName!, aliases: aliases(of: $0),
-                         pid: $0.processIdentifier,
-                         isFrontmost: $0.processIdentifier == frontPID)
-        }
-        guard let pick = pickApp(for: letter, among: candidates),
-              let app = running.first(where: { $0.processIdentifier == pick.pid })
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.localizedName != nil && !$0.isTerminated }
+            .map { app in
+                SwitchableApp(app: app, candidate: AppCandidate(
+                    name: app.localizedName!, id: UsageStore.id(of: app), aliases: aliases(of: app),
+                    pid: app.processIdentifier, isFrontmost: app.processIdentifier == frontPID,
+                    score: usage.score(of: app)))
+            }
+    }
+
+    static func activate(letter: Character, usage: UsageStore) -> NSRunningApplication? {
+        let apps = switchableApps(usage: usage)
+        guard let pick = pickApp(for: letter, among: apps.map(\.candidate)),
+              let app = apps.first(where: { $0.candidate.pid == pick.pid })?.app
         else { return nil }
 
+        usage.noteSwitch(to: app)
         if app.isHidden { app.unhide() }
         if !app.activate(options: .activateAllWindows) {
             // Cooperative activation can refuse a background app's request.

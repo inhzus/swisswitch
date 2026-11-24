@@ -43,3 +43,41 @@ private func app(_ name: String, _ pid: pid_t, aliases: [String] = [], front: Bo
     #expect(pickApp(for: "f", among: apps)?.pid == 1)
     #expect(pickApp(for: "m", among: apps)?.pid == 2)
 }
+
+@Test func latinNameIgnoresAliases() {
+    let apps = [app("Google Chrome", 1, aliases: ["Google Chrome", "Chrome"])]
+    #expect(pickApp(for: "g", among: apps)?.pid == 1)
+    #expect(pickApp(for: "c", among: apps) == nil)
+}
+
+private func scored(_ name: String, _ pid: pid_t, _ score: Double, front: Bool = false) -> AppCandidate {
+    AppCandidate(name: name, pid: pid, isFrontmost: front, score: score)
+}
+
+@Test func higherScoreBeatsAlphabetical() {
+    let apps = [scored("Safari", 1, 1), scored("Surge", 2, 5)]
+    #expect(pickApp(for: "s", among: apps)?.name == "Surge")
+}
+
+@Test func cyclesInScoreOrder() {
+    let apps = [scored("Safari", 1, 1), scored("Surge", 2, 5, front: true), scored("Slack", 3, 3)]
+    #expect(pickApp(for: "s", among: apps)?.name == "Slack")
+    let next = [scored("Safari", 1, 1), scored("Surge", 2, 5), scored("Slack", 3, 3, front: true)]
+    #expect(pickApp(for: "s", among: next)?.name == "Safari")
+    let wrap = [scored("Safari", 1, 1, front: true), scored("Surge", 2, 5), scored("Slack", 3, 3)]
+    #expect(pickApp(for: "s", among: wrap)?.name == "Surge")
+}
+
+@Test func groupsByLetterInPressOrder() {
+    let apps = [scored("Safari", 1, 0), scored("Surge", 2, 2), scored("Notes", 3, 0),
+                AppCandidate(name: "访达", aliases: ["Finder"], pid: 4, isFrontmost: false)]
+    let groups = groupedApps(apps)
+    #expect(groups.map(\.letter) == ["f", "n", "s"])
+    #expect(groups.last?.apps.map(\.name) == ["Surge", "Safari"])
+    #expect(groups.first?.apps.first?.pid == 4)
+}
+
+@Test func idDefaultsToName() {
+    #expect(AppCandidate(name: "Safari", pid: 1, isFrontmost: false).id == "Safari")
+    #expect(AppCandidate(name: "Safari", id: "com.apple.Safari", pid: 1, isFrontmost: false).id == "com.apple.Safari")
+}

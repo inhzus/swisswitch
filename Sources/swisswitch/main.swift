@@ -3,11 +3,31 @@ import AppKit
 @MainActor
 final class AppController {
     private let hud = SwitchHUD()
+    private let preview = AppPreview()
+    private let usage = UsageStore()
+    private var statusMenu: StatusMenu?
     private var tap: KeyTap?
     private var onboarding: OnboardingWindow?
     private var debugSignal: DispatchSourceSignal?
+    /// Opts out of App Nap: a napped process answers the event tap late, and
+    /// since the tap filters every keystroke, that stalls typing system-wide.
+    private let activity = ProcessInfo.processInfo.beginActivity(
+        options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+        reason: "Global keyboard shortcut tap")
 
     func start() {
+        statusMenu = StatusMenu(
+            onShowApps: { [weak self] in self?.showPreview(autoHide: .seconds(3)) },
+            onReset: { [weak self] in
+                self?.usage.reset()
+                self?.log("learned preferences reset")
+            })
+        usage.start()
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.usage.flush() }
+        }
         if AXIsProcessTrusted() {
             startTap()
         } else {
@@ -20,7 +40,8 @@ final class AppController {
     }
 
     /// Debug only: with SWISSWITCH_DEBUG_LETTER_FILE set, `kill -USR1 <pid>` switches
-    /// using the letter in that file. Synthetic keys from automation tools are often
+    /// using the letter in that file, or shows/hides the preview when the file
+    /// says `preview`/`release`. Synthetic keys from automation tools are often
     /// posted straight to a process and never reach the session event tap.
     private func installDebugTrigger() {
         guard let path = ProcessInfo.processInfo.environment["SWISSWITCH_DEBUG_LETTER_FILE"] else { return }
@@ -28,8 +49,13 @@ final class AppController {
         let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
-                guard let text = try? String(contentsOfFile: path, encoding: .utf8),
-                      let letter = text.lowercased().first(where: { $0.isASCII && $0.isLetter })
+                guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+                switch text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "preview": self?.showPreview(); return
+                case "release": self?.preview.hide(); return
+                default: break
+                }
+                guard let letter = text.lowercased().first(where: { $0.isASCII && $0.isLetter })
                 else { return }
                 self?.switchTo(letter)
             }
@@ -40,17 +66,27 @@ final class AppController {
     }
 
     private func startTap() {
-        let tap = KeyTap { [weak self] letter in self?.switchTo(letter) }
+        let tap = KeyTap(
+            onLetter: { [weak self] letter in self?.switchTo(letter) },
+            onHold: { [weak self] down in
+                if down { self?.showPreview() } else { self?.preview.hide() }
+            })
         guard tap.start() else {
             log("could not create the event tap; is Accessibility access granted?")
             exit(1)
         }
         self.tap = tap
-        log("running; press Right ⌘ + a letter (Ctrl-C to quit)")
+        log("running; press Right ⌘ + a letter, hold Right ⌘ to preview (quit from the menu bar)")
+    }
+
+    private func showPreview(autoHide: Duration? = nil) {
+        hud.hide()
+        preview.show(AppActivator.switchableApps(usage: usage), autoHide: autoHide)
     }
 
     private func switchTo(_ letter: Character) {
-        if let app = AppActivator.activate(letter: letter) {
+        preview.hide()
+        if let app = AppActivator.activate(letter: letter, usage: usage) {
             log("\(letter) → \(app.localizedName ?? "?")")
             hud.show(.app(name: app.localizedName ?? "", icon: app.icon, letter: letter))
         } else {

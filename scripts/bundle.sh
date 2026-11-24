@@ -16,7 +16,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>Swisswitch</string>
     <key>CFBundleDisplayName</key><string>Swisswitch</string>
-    <key>CFBundleIdentifier</key><string>dev.swisswitch.Swisswitch</string>
+    <key>CFBundleIdentifier</key><string>io.zunish.Swisswitch</string>
     <key>CFBundleExecutable</key><string>swisswitch</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -26,5 +26,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-codesign --force --sign - "$APP"
+# A stable identity (see scripts/make-cert.sh) keeps the Accessibility grant
+# across rebuilds; ad-hoc signing ties it to this exact build.
+IDENTITY="${SWISSWITCH_SIGN_IDENTITY:-swisswitch Dev}"
+if security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
+    codesign --force --sign "$IDENTITY" "$APP"
+else
+    echo "note: no \"$IDENTITY\" certificate; signing ad-hoc (run scripts/make-cert.sh)"
+    codesign --force --sign - "$APP"
+fi
 echo "Built $APP"

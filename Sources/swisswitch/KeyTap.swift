@@ -1,83 +1,190 @@
 import AppKit
 import CoreGraphics
 
-/// Global keyboard tap that reports Right ⌘ + letter and swallows those events.
+/// Global keyboard tap that reports Right ⌘ + letter (swallowing those events)
+/// and Right ⌘ held on its own for `holdDelay` (never swallowed).
+///
+/// The tap is an active filter, so every key event system-wide waits for its
+/// callback. The callback therefore runs on a dedicated high-priority thread and
+/// only classifies the event; all real work is handed to the main actor
+/// asynchronously, so a busy main thread can never stall typing.
 @MainActor
 final class KeyTap {
-    /// `NX_DEVICERCMDKEYMASK` from IOKit's IOLLEvent.h: set only while the
-    /// *right* Command key is down.
-    private static let rightCommandMask: UInt64 = 0x10
-    private static let otherModifiers: CGEventFlags = [.maskShift, .maskAlternate, .maskControl]
+    /// How long Right ⌘ must be held alone to show the preview; SWISSWITCH_HOLD_MS overrides.
+    private static let holdDelay: Duration = .milliseconds(
+        ProcessInfo.processInfo.environment["SWISSWITCH_HOLD_MS"].flatMap(Int.init) ?? 1000)
 
     private let onLetter: (Character) -> Void
-    private var machPort: CFMachPort?
+    private let onHold: (Bool) -> Void
+    private var context: TapContext?
+    private var holdTimer: Task<Void, Never>?
+    private var holding = false
 
-    init(onLetter: @escaping (Character) -> Void) {
+    init(onLetter: @escaping (Character) -> Void, onHold: @escaping (Bool) -> Void) {
         self.onLetter = onLetter
+        self.onHold = onHold
     }
 
     /// Installs the tap. Fails when the process lacks Accessibility access.
     func start() -> Bool {
-        guard machPort == nil else { return true }
+        guard context == nil else { return true }
+        let context = TapContext { [weak self] signal in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.receive(signal) }
+            }
+        }
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         guard let port = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
             callback: keyTapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
+            userInfo: Unmanaged.passUnretained(context).toOpaque()
         ) else { return false }
-        let source = CFMachPortCreateRunLoopSource(nil, port, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: port, enable: true)
-        machPort = port
+        context.port = port
+        let thread = TapThread(port: port)
+        thread.name = "swisswitch.keytap"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        self.context = context
         return true
     }
 
-    /// Returns true when the event should be swallowed.
-    fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
-        switch type {
-        case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let machPort { CGEvent.tapEnable(tap: machPort, enable: true) }
-            return false
-        case .keyDown:
-            guard let letter = Self.triggerLetter(of: event) else { return false }
-            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+    private func receive(_ signal: TapSignal) {
+        switch signal {
+        case .keyDown(let letter):
+            cancelHoldTimer()
+            if let letter {
                 onLetter(letter)
+                endHold()
             }
-            return true
-        default:
-            return false
+        case .flags(let rightDown, let alone):
+            flagsChanged(rightDown: rightDown, alone: alone)
+        case .reenabled(let timeout):
+            print("[swisswitch] event tap re-enabled after \(timeout ? "timeout" : "user input")")
         }
     }
 
-    /// The lowercase a–z letter when `event` is Right ⌘ + letter with no other modifiers.
-    private static func triggerLetter(of event: CGEvent) -> Character? {
-        let flags = event.flags
-        guard flags.contains(.maskCommand),
-              flags.rawValue & rightCommandMask != 0,
-              flags.isDisjoint(with: otherModifiers),
-              // Layout-aware: the character this key types without modifiers.
-              let chars = NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased(),
-              chars.count == 1,
-              let letter = chars.first,
-              letter.isASCII, letter.isLetter
-        else { return nil }
-        return letter
+    /// Arms the hold timer when Right ⌘ goes down alone; any other modifier
+    /// change cancels it, and releasing Right ⌘ ends a hold in progress.
+    private func flagsChanged(rightDown: Bool, alone: Bool) {
+        if alone && !holding {
+            guard holdTimer == nil else { return }
+            holdTimer = Task { [weak self] in
+                try? await Task.sleep(for: Self.holdDelay)
+                guard !Task.isCancelled, let self else { return }
+                self.holdTimer = nil
+                self.holding = true
+                self.onHold(true)
+            }
+        } else {
+            cancelHoldTimer()
+            if !rightDown { endHold() }
+        }
+    }
+
+    private func cancelHoldTimer() {
+        holdTimer?.cancel()
+        holdTimer = nil
+    }
+
+    private func endHold() {
+        guard holding else { return }
+        holding = false
+        onHold(false)
     }
 }
 
+/// What the tap thread tells the main actor.
+private enum TapSignal: Sendable {
+    /// A key went down; `letter` is set for a (non-repeat) Right ⌘ + letter trigger.
+    case keyDown(letter: Character?)
+    case flags(rightDown: Bool, alone: Bool)
+    case reenabled(timeout: Bool)
+}
+
+/// State shared with the C callback on the tap thread.
+private final class TapContext: @unchecked Sendable {
+    /// Set once before the tap thread starts, read only afterwards.
+    var port: CFMachPort?
+    let deliver: @Sendable (TapSignal) -> Void
+
+    init(deliver: @escaping @Sendable (TapSignal) -> Void) {
+        self.deliver = deliver
+    }
+}
+
+/// Runs the tap's run loop off the main thread.
+private final class TapThread: Thread, @unchecked Sendable {
+    private let port: CFMachPort
+
+    init(port: CFMachPort) {
+        self.port = port
+        super.init()
+    }
+
+    override func main() {
+        let source = CFMachPortCreateRunLoopSource(nil, port, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: port, enable: true)
+        CFRunLoopRun()
+    }
+}
+
+/// `NX_DEVICERCMDKEYMASK` / `NX_DEVICELCMDKEYMASK` from IOKit's IOLLEvent.h:
+/// set only while the right / left Command key is down.
+private let rightCommandMask: UInt64 = 0x10
+private let leftCommandMask: UInt64 = 0x08
+private let otherModifiers: CGEventFlags = [.maskShift, .maskAlternate, .maskControl]
+
+/// The lowercase a–z letter when `event` is Right ⌘ + letter with no other modifiers.
+private func triggerLetter(of event: CGEvent) -> Character? {
+    let flags = event.flags
+    guard flags.contains(.maskCommand),
+          flags.rawValue & rightCommandMask != 0,
+          flags.isDisjoint(with: otherModifiers),
+          // Layout-aware: the character this key types without modifiers.
+          let chars = NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased(),
+          chars.count == 1,
+          let letter = chars.first,
+          letter.isASCII, letter.isLetter
+    else { return nil }
+    return letter
+}
+
+/// Runs on the tap thread: classify, hand off, and return immediately.
 private func keyTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
     event: CGEvent,
     refcon: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
-    guard let refcon else { return Unmanaged.passUnretained(event) }
-    let tap = Unmanaged<KeyTap>.fromOpaque(refcon).takeUnretainedValue()
-    // The tap's run-loop source is on the main run loop, so this is the main thread.
-    nonisolated(unsafe) let event = event
-    let swallow = MainActor.assumeIsolated { tap.handle(type: type, event: event) }
-    return swallow ? nil : Unmanaged.passUnretained(event)
+    let pass = Unmanaged.passUnretained(event)
+    guard let refcon else { return pass }
+    let context = Unmanaged<TapContext>.fromOpaque(refcon).takeUnretainedValue()
+    switch type {
+    case .tapDisabledByTimeout, .tapDisabledByUserInput:
+        if let port = context.port { CGEvent.tapEnable(tap: port, enable: true) }
+        context.deliver(.reenabled(timeout: type == .tapDisabledByTimeout))
+        return pass
+    case .flagsChanged:
+        let raw = event.flags.rawValue
+        let rightDown = raw & rightCommandMask != 0
+        let alone = rightDown && raw & leftCommandMask == 0
+            && event.flags.isDisjoint(with: otherModifiers)
+        context.deliver(.flags(rightDown: rightDown, alone: alone))
+        return pass
+    case .keyDown:
+        guard let letter = triggerLetter(of: event) else {
+            context.deliver(.keyDown(letter: nil))
+            return pass
+        }
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        context.deliver(.keyDown(letter: isRepeat ? nil : letter))
+        return nil
+    default:
+        return pass
+    }
 }

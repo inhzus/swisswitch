@@ -8,7 +8,9 @@ Hold the right Command key and press a letter, and swisswitch jumps straight to 
 
 - **Right ⌘ + letter**: focus the running app whose name starts with that letter, e.g. `S` for Safari or `T` for Terminal.
 - **Not running?** The same keys launch the matching installed app.
-- **Several matches?** Press the letter again to cycle through them.
+- **Several matches?** The first press goes to the one you use most; press again to cycle through the rest.
+- **Hold Right ⌘** for about a second to preview every app and its letter.
+- **Learns your habits**: activations that stick (≥ 1.5 s in front) raise an app's score, which halves every 7 days without use. Stats live in `~/Library/Application Support/swisswitch/usage.json`.
 - **Already in front?** Pressing its letter again hides it.
 - **Left ⌘ is unaffected**, so ⌘C, ⌘V and the rest behave as usual.
 
@@ -21,12 +23,13 @@ Hold the right Command key and press a letter, and swisswitch jumps straight to 
 - [x] Cycling through apps that share a letter
 - [x] Liquid Glass switch HUD and Accessibility onboarding
 - [ ] Hide on re-press
-- [ ] Menu-bar app (no Dock icon)
+- [x] Menu-bar app (no Dock icon) with Quit
+- [x] Usage-learned preference among apps sharing a letter
 
 **Later**
 - [ ] Custom letter assignments per app
 - [ ] Configurable trigger key (Caps Lock, fn, Right ⌥, …)
-- [ ] On-screen hint overlay showing which letter maps to which app
+- [x] On-screen hint overlay showing which letter maps to which app (hold Right ⌘)
 - [ ] Cycling through windows of the same app
 - [ ] Launch at login
 
@@ -44,7 +47,7 @@ swisswitch aims to be a small, free, open-source take on the core idea, Right �
 Requires **macOS 27** or later. Only the Xcode Command Line Tools are needed; full Xcode isn't.
 
 ```sh
-swift run swisswitch          # run from the terminal (Ctrl-C to quit)
+swift run swisswitch          # run from the terminal (quit from the menu bar or Ctrl-C)
 ./scripts/test.sh             # run the tests
 ./scripts/bundle.sh           # build build/Swisswitch.app (LSUIElement, no Dock icon)
 ```
@@ -53,7 +56,7 @@ swift run swisswitch          # run from the terminal (Ctrl-C to quit)
 
 ### Debugging
 
-UI automation tools usually post synthetic keys straight to a process, so those keys never reach the global event tap. For scripted checks, set `SWISSWITCH_DEBUG_LETTER_FILE=<path>`, write a letter to that file, and send `kill -USR1 <pid>`. `SWISSWITCH_HUD_HOLD_MS` keeps the HUD on screen longer.
+UI automation tools usually post synthetic keys straight to a process, so those keys never reach the global event tap. For scripted checks, set `SWISSWITCH_DEBUG_LETTER_FILE=<path>`, write a letter (or `preview` / `release` for the hold overlay) to that file, and send `kill -USR1 <pid>`. `SWISSWITCH_HUD_HOLD_MS` keeps the HUD on screen longer, `SWISSWITCH_HOLD_MS` changes the Right ⌘ hold delay, and `SWISSWITCH_USAGE_FILE` points usage stats at another file.
 
 ## Permissions
 
@@ -61,7 +64,7 @@ swisswitch will need **Accessibility** access, granted in System Settings → Pr
 
 ## Status
 
-Early days. Right ⌘ + letter switches between running apps.
+Early days. Right ⌘ + letter switches between running apps, preferring the ones you use most; holding Right ⌘ previews them all; quit from the ⌘ menu-bar item.
 
 ## License
 
