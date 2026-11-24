@@ -15,9 +15,11 @@ Hold the right Command key and press a letter, and swisswitch jumps straight to 
 ## Roadmap
 
 **MVP**
-- [ ] Global Right ⌘ key tap
-- [ ] Letter → running app matching, plus launching apps that aren't running
-- [ ] Cycling through apps that share a letter
+- [x] Global Right ⌘ key tap
+- [x] Letter → running app matching (also on non-localized names, e.g. 访达 → `F` for Finder)
+- [ ] Launching apps that aren't running
+- [x] Cycling through apps that share a letter
+- [x] Liquid Glass switch HUD and Accessibility onboarding
 - [ ] Hide on re-press
 - [ ] Menu-bar app (no Dock icon)
 
@@ -37,11 +39,21 @@ swisswitch is inspired by these apps:
 
 swisswitch aims to be a small, free, open-source take on the core idea, Right ⌘ + letter, done well.
 
-## Building (planned)
+## Building
 
-- A Swift Package Manager executable target.
-- `scripts/bundle.sh` wraps the binary into `Swisswitch.app`, with an `Info.plist` that sets `LSUIElement` so the app runs from the menu bar.
-- Only the Xcode Command Line Tools are required; full Xcode isn't needed.
+Requires **macOS 27** or later. Only the Xcode Command Line Tools are needed; full Xcode isn't.
+
+```sh
+swift run swisswitch          # run from the terminal (Ctrl-C to quit)
+./scripts/test.sh             # run the tests
+./scripts/bundle.sh           # build build/Swisswitch.app (LSUIElement, no Dock icon)
+```
+
+`scripts/test.sh` exists because the Command Line Tools keep the Swift Testing macro plugin in a folder SwiftPM doesn't search by default.
+
+### Debugging
+
+UI automation tools usually post synthetic keys straight to a process, so those keys never reach the global event tap. For scripted checks, set `SWISSWITCH_DEBUG_LETTER_FILE=<path>`, write a letter to that file, and send `kill -USR1 <pid>`. `SWISSWITCH_HUD_HOLD_MS` keeps the HUD on screen longer.
 
 ## Permissions
 
@@ -49,7 +61,7 @@ swisswitch will need **Accessibility** access, granted in System Settings → Pr
 
 ## Status
 
-Early days. Nothing runnable yet.
+Early days. Right ⌘ + letter switches between running apps.
 
 ## License
 
