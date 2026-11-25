@@ -82,6 +82,7 @@ final class AppController {
     private func startTap() {
         let tap = KeyTap(
             assignedDigits: keys.assignedDigits,
+            trigger: settings.triggerState,
             holdDelay: { [weak self] in self?.settings.holdDelay ?? .seconds(1) },
             onLetter: { [weak self] letter in self?.switchTo(letter) },
             onHold: { [weak self] down in
@@ -94,12 +95,14 @@ final class AppController {
             exit(1)
         }
         self.tap = tap
-        Log.info("event tap running; press Right ⌘ + a letter or digit, hold Right ⌘ to preview")
+        let trigger = settings.triggerKey.name
+        Log.info("event tap running; press \(trigger) + a letter or digit, hold \(trigger) to preview")
     }
 
     private func showPreview(autoHide: Duration? = nil) {
         hud.hide()
-        preview.show(AppActivator.switchableApps(usage: usage, keys: keys), autoHide: autoHide)
+        preview.show(AppActivator.switchableApps(usage: usage, keys: keys),
+                     trigger: settings.triggerKey, autoHide: autoHide)
     }
 
     private func switchTo(_ letter: Character) {
@@ -107,16 +110,17 @@ final class AppController {
         if let app = AppActivator.activate(key: letter, usage: usage, keys: keys) {
             Log.info("\(letter) → \(app.localizedName ?? "?") (\(UsageStore.id(of: app)))")
             if settings.showHUD {
-                hud.show(.app(name: app.localizedName ?? "", icon: app.icon, letter: letter))
+                hud.show(.app(name: app.localizedName ?? "", icon: app.icon, letter: letter),
+                         trigger: settings.triggerKey)
             }
         } else {
             Log.info("\(letter) → no running app")
-            if settings.showHUD { hud.show(.noMatch(letter: letter)) }
+            if settings.showHUD { hud.show(.noMatch(letter: letter), trigger: settings.triggerKey) }
         }
     }
 
     private func logSettings() {
-        Log.info("settings: HUD \(settings.showHUD), preview \(settings.previewEnabled), "
+        Log.info("settings: trigger \(settings.triggerKey.name), HUD \(settings.showHUD), preview \(settings.previewEnabled), "
             + "hold delay \(settings.holdDelay), launch at login \(settings.loginStatus.logDescription), "
             + "\(keys.entries.count) key assignment(s)")
     }

@@ -19,6 +19,8 @@ Hold the right Command key and press a letter to jump straight to that app: `S` 
 - **Hold to preview.** Hold Right ⌘ for about a second to see every app and its letter.
 - **Your own keys.** Reassign any app to a letter or digit in Settings → Keys. Digits are only
   taken when an app uses them, so ⌘1…⌘9 keep working elsewhere.
+- **Pick your trigger.** Use Right ⌘, Right ⌥, Right ⌃ or Right ⇧ (Settings → General). Only
+  the right-hand key triggers; its left twin keeps its usual job.
 - **Native names.** Localized apps match by their English name too, e.g. 访达 → `F` for Finder.
 
 ## Install
@@ -38,7 +40,7 @@ and move `Swisswitch.app` to `/Applications`.
 > this for you.
 
 On first launch, grant **Accessibility** in System Settings → Privacy & Security. swisswitch
-needs it to see the Right ⌘ key and bring apps to the front.
+needs it to see the trigger key and bring apps to the front.
 
 ## Prior art
 

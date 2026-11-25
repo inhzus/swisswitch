@@ -29,9 +29,10 @@ final class SwitchHUD {
         panel.contentView = host
     }
 
-    func show(_ content: Content) {
+    func show(_ content: Content, trigger: TriggerKey) {
         position()
         panel.orderFrontRegardless()
+        model.trigger = trigger
         withAnimation(.spring(duration: 0.35, bounce: 0.3)) {
             model.content = content
             model.serial += 1
@@ -95,6 +96,7 @@ final class HUDPanel: NSPanel {
 @MainActor
 private final class HUDModel {
     var content: SwitchHUD.Content?
+    var trigger: TriggerKey = .default
     var serial = 0
 }
 
@@ -106,7 +108,7 @@ private struct HUDView: View {
         GlassEffectContainer(spacing: 14) {
             if let content = model.content {
                 HStack(spacing: 10) {
-                    KeyCap(letter: content.letter, matched: content.isMatch)
+                    KeyCap(symbol: model.trigger.symbol, letter: content.letter, matched: content.isMatch)
                         .glassEffectID("key", in: glass)
                     label(for: content)
                         .glassEffectID("label", in: glass)
@@ -149,12 +151,13 @@ private struct HUDView: View {
 }
 
 private struct KeyCap: View {
+    let symbol: String
     let letter: Character
     let matched: Bool
 
     var body: some View {
         HStack(spacing: 2) {
-            Text("⌘").font(.system(size: 15, weight: .semibold))
+            Text(symbol).font(.system(size: 15, weight: .semibold))
             Text(String(letter).uppercased())
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .contentTransition(.numericText())

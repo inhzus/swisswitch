@@ -61,7 +61,7 @@ private struct OnboardingView: View {
             VStack(spacing: 6) {
                 Text("Allow Accessibility")
                     .font(.title2.weight(.bold))
-                Text("swisswitch needs Accessibility access to listen for Right ⌘ and bring apps to the front.")
+                Text("swisswitch needs Accessibility access to listen for its trigger key (Right ⌘ by default) and bring apps to the front.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
