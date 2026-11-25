@@ -52,4 +52,4 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for building, debugging and relea
 
 ## License
 
-TBD.
+Licensed under the [Apache License 2.0](LICENSE).
