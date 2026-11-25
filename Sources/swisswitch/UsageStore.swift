@@ -27,12 +27,28 @@ final class UsageStore {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             fileURL = support.appending(path: "swisswitch/usage.json")
         }
-        stats = (try? Data(contentsOf: fileURL))
-            .flatMap { data in
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                return try? decoder.decode(UsageStats.self, from: data)
-            } ?? UsageStats()
+        stats = Self.load(from: fileURL)
+    }
+
+    private static func load(from url: URL) -> UsageStats {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch CocoaError.fileReadNoSuchFile {
+            Log.info("no usage stats yet at \(url.path)")
+            return UsageStats()
+        } catch {
+            Log.error("could not read usage stats at \(url.path): \(error)")
+            return UsageStats()
+        }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(UsageStats.self, from: data)
+        } catch {
+            Log.error("usage stats at \(url.path) are unreadable, starting fresh: \(error)")
+            return UsageStats()
+        }
     }
 
     func start() {
@@ -110,7 +126,7 @@ final class UsageStore {
             encoder.dateEncodingStrategy = .iso8601
             try encoder.encode(snapshot).write(to: fileURL, options: .atomic)
         } catch {
-            print("[swisswitch] could not save usage: \(error)")
+            Log.error("could not save usage stats to \(fileURL.path): \(error)")
         }
     }
 }

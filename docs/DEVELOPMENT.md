@@ -26,6 +26,11 @@ identity; `bundle.sh` signs with it automatically, and the grant then survives r
 - Usage stats: `~/Library/Application Support/swisswitch/usage.json`. An activation that
   stays in front for at least 1.5 s raises an app's score, and the score halves every 7 days
   without use.
+- Log: `~/Library/Application Support/swisswitch/logs/swisswitch.log` (menu bar → Show Log
+  in Finder). It rolls over at 1 MB into `swisswitch.1.log` … `swisswitch.3.log`, so it never
+  takes more than about 4 MB. The same lines go to the unified log
+  (`log stream --predicate 'subsystem == "io.zunish.Swisswitch"'`) and to stderr when run
+  from a terminal.
 
 ## Debugging
 
@@ -40,6 +45,7 @@ send `kill -USR1 <pid>`.
 | `SWISSWITCH_HOLD_MS` | Overrides the Right ⌘ hold delay set in Settings |
 | `SWISSWITCH_USAGE_FILE` | Points usage stats at another file |
 | `SWISSWITCH_DEFAULTS_SUITE` | Stores key assignments in another defaults domain |
+| `SWISSWITCH_LOG_FILE` | Writes the log to another file (archives go next to it) |
 
 ## Roadmap
 

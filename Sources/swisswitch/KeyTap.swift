@@ -74,7 +74,7 @@ final class KeyTap {
         case .flags(let rightDown, let alone):
             flagsChanged(rightDown: rightDown, alone: alone)
         case .reenabled(let timeout):
-            print("[swisswitch] event tap re-enabled after \(timeout ? "timeout" : "user input")")
+            Log.warning("event tap was disabled by \(timeout ? "timeout" : "user input"); re-enabled")
         }
     }
 
@@ -196,6 +196,14 @@ final class KeyboardLayoutMap {
     func rebuild() {
         let map = Self.currentMap()
         table.withLock { $0 = map }
+        let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+        let id = source.flatMap { TISGetInputSourceProperty($0, kTISPropertyInputSourceID) }
+            .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String } ?? "?"
+        if map.isEmpty {
+            Log.error("keyboard layout \(id) maps no letters or digits; switching won't work")
+        } else {
+            Log.info("keyboard layout \(id): \(map.count) keys mapped")
+        }
     }
 
     private static func layoutData(_ source: TISInputSource?) -> CFData? {

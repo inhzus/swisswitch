@@ -23,11 +23,23 @@ final class AppSettings {
     @ObservationIgnored private let defaults = UserDefaults.swisswitch
 
     /// Show the switch HUD after each switch.
-    var showHUD: Bool { didSet { defaults.set(showHUD, forKey: "showHUD") } }
+    var showHUD: Bool {
+        didSet { defaults.set(showHUD, forKey: "showHUD"); Log.info("setting: HUD \(showHUD)") }
+    }
     /// Show the app preview while Right ⌘ is held alone.
-    var previewEnabled: Bool { didSet { defaults.set(previewEnabled, forKey: "previewEnabled") } }
+    var previewEnabled: Bool {
+        didSet {
+            defaults.set(previewEnabled, forKey: "previewEnabled")
+            Log.info("setting: preview \(previewEnabled)")
+        }
+    }
     /// Seconds Right ⌘ must be held before the preview appears.
-    var previewDelay: Double { didSet { defaults.set(previewDelay, forKey: "previewDelay") } }
+    var previewDelay: Double {
+        didSet {
+            defaults.set(previewDelay, forKey: "previewDelay")
+            Log.info("setting: preview delay \(previewDelay)s")
+        }
+    }
 
     /// Login-item state, refreshed from the system.
     private(set) var loginStatus: SMAppService.Status = .notRegistered
@@ -60,12 +72,26 @@ final class AppSettings {
                 else { try SMAppService.mainApp.unregister() }
             } catch {
                 loginError = error.localizedDescription
+                Log.error("could not \(newValue ? "register" : "unregister") login item: \(error)")
             }
             refreshLogin()
+            Log.info("launch at login: \(loginStatus.logDescription)")
         }
     }
 
     func refreshLogin() {
         loginStatus = SMAppService.mainApp.status
+    }
+}
+
+extension SMAppService.Status {
+    var logDescription: String {
+        switch self {
+        case .notRegistered: "not registered"
+        case .enabled: "enabled"
+        case .requiresApproval: "requires approval"
+        case .notFound: "not found"
+        @unknown default: "status \(rawValue)"
+        }
     }
 }

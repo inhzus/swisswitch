@@ -12,7 +12,7 @@ final class AppController {
         keys: keys, settings: settings,
         onResetUsage: { [weak self] in
             self?.usage.reset()
-            self?.log("learned preferences reset")
+            Log.info("learned preferences reset")
         })
     private var statusMenu: StatusMenu?
     private var tap: KeyTap?
@@ -25,22 +25,31 @@ final class AppController {
         reason: "Global keyboard shortcut tap")
 
     func start() {
+        logSettings()
         statusMenu = StatusMenu(
             onShowApps: { [weak self] in self?.showPreview(autoHide: .seconds(3)) },
-            onSettings: { [weak self] in self?.settingsWindow.show() })
+            onSettings: { [weak self] in self?.settingsWindow.show() },
+            onShowLog: { NSWorkspace.shared.activateFileViewerSelecting([Log.file.fileURL]) })
         usage.start()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.usage.flush() }
+            MainActor.assumeIsolated {
+                self?.usage.flush()
+                Log.info("quitting")
+            }
         }
         if AXIsProcessTrusted() {
             startTap()
         } else {
+            Log.warning("Accessibility access not granted; showing onboarding")
             _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
             let window = OnboardingWindow()
             onboarding = window
-            window.show { [weak self] in self?.startTap() }
+            window.show { [weak self] in
+                Log.info("Accessibility access granted")
+                self?.startTap()
+            }
         }
         installDebugTrigger()
     }
@@ -67,7 +76,7 @@ final class AppController {
         }
         source.resume()
         debugSignal = source
-        log("debug trigger on SIGUSR1 (pid \(getpid()), letter file \(path))")
+        Log.info("debug trigger on SIGUSR1 (pid \(getpid()), letter file \(path))")
     }
 
     private func startTap() {
@@ -81,11 +90,11 @@ final class AppController {
                 else { self.preview.hide() }
             })
         guard tap.start() else {
-            log("could not create the event tap; is Accessibility access granted?")
+            Log.error("could not create the event tap (Accessibility trusted: \(AXIsProcessTrusted())); exiting")
             exit(1)
         }
         self.tap = tap
-        log("running; press Right ⌘ + a letter or digit, hold Right ⌘ to preview (quit from the menu bar)")
+        Log.info("event tap running; press Right ⌘ + a letter or digit, hold Right ⌘ to preview")
     }
 
     private func showPreview(autoHide: Duration? = nil) {
@@ -96,22 +105,28 @@ final class AppController {
     private func switchTo(_ letter: Character) {
         preview.hide()
         if let app = AppActivator.activate(key: letter, usage: usage, keys: keys) {
-            log("\(letter) → \(app.localizedName ?? "?")")
+            Log.info("\(letter) → \(app.localizedName ?? "?") (\(UsageStore.id(of: app)))")
             if settings.showHUD {
                 hud.show(.app(name: app.localizedName ?? "", icon: app.icon, letter: letter))
             }
         } else {
-            log("\(letter) → no running app")
+            Log.info("\(letter) → no running app")
             if settings.showHUD { hud.show(.noMatch(letter: letter)) }
         }
     }
 
-    private func log(_ message: String) {
-        print("[swisswitch] \(message)")
-        fflush(stdout)
+    private func logSettings() {
+        Log.info("settings: HUD \(settings.showHUD), preview \(settings.previewEnabled), "
+            + "hold delay \(settings.holdDelay), launch at login \(settings.loginStatus.logDescription), "
+            + "\(keys.entries.count) key assignment(s)")
     }
 }
 
+Log.installExceptionHandler()
+let info = Bundle.main.infoDictionary ?? [:]
+Log.info("launched swisswitch \(info["CFBundleShortVersionString"] as? String ?? "dev") "
+    + "(\(info["CFBundleVersion"] as? String ?? "-")), pid \(getpid()), "
+    + "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), at \(Bundle.main.bundlePath)")
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let controller = AppController()

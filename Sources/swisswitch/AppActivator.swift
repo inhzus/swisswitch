@@ -35,10 +35,16 @@ enum AppActivator {
         if !app.activate(options: .activateAllWindows) {
             // Cooperative activation can refuse a background app's request.
             // Opening an already-running app's bundle just brings it forward.
-            if let url = app.bundleURL {
-                let config = NSWorkspace.OpenConfiguration()
-                config.activates = true
-                NSWorkspace.shared.openApplication(at: url, configuration: config)
+            let name = app.localizedName ?? "?"
+            guard let url = app.bundleURL else {
+                Log.warning("activating \(name) was refused and it has no bundle to open")
+                return app
+            }
+            Log.info("activating \(name) was refused; opening its bundle instead")
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
+                if let error { Log.error("could not open \(url.path): \(error)") }
             }
         }
         return app

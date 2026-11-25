@@ -37,11 +37,13 @@ final class KeyAssignmentStore {
             guard let key = triggerKey(for: key) else { return }
             entries[id] = String(key)
         }
+        Log.info("key assignment: \(id) → \(entries[id].map { $0.isEmpty ? "none" : $0 } ?? "automatic")")
         save()
     }
 
     func reset() {
         entries.removeAll()
+        Log.info("key assignments reset")
         save()
     }
 
