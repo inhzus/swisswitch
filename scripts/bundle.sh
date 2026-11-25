@@ -7,10 +7,12 @@
 #   SIGN_IDENTITY  codesign identity to use (CI). A "Developer ID …" identity also gets the
 #                  hardened runtime and a secure timestamp, as notarization requires.
 #
-# Without SIGN_IDENTITY it signs with the local "swisswitch Dev" identity (see
-# scripts/make-cert.sh, override with SWISSWITCH_SIGN_IDENTITY) when present, else ad-hoc.
-# A stable identity keeps the Accessibility grant across rebuilds; ad-hoc signing ties it to
-# this exact build.
+# Without SIGN_IDENTITY it signs with the first local identity found (override with
+# SWISSWITCH_SIGN_IDENTITY):
+#   1. "Swisswitch Release": the release certificate, so a local build shares the
+#      Accessibility grant of the installed release (the grant is per bundle ID + certificate)
+#   2. "swisswitch Dev": the self-signed identity from scripts/make-cert.sh
+#   3. ad-hoc, which ties the grant to this exact build
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -40,11 +42,18 @@ if [[ -n "${SIGN_IDENTITY:-}" ]]; then
         codesign --force --sign "$SIGN_IDENTITY" "$APP"
     fi
 else
-    IDENTITY="${SWISSWITCH_SIGN_IDENTITY:-swisswitch Dev}"
-    if security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
+    IDENTITY=""
+    for candidate in ${SWISSWITCH_SIGN_IDENTITY:+"$SWISSWITCH_SIGN_IDENTITY"} "Swisswitch Release" "swisswitch Dev"; do
+        if security find-certificate -c "$candidate" >/dev/null 2>&1; then
+            IDENTITY="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$IDENTITY" ]]; then
+        echo "signing with \"$IDENTITY\""
         codesign --force --sign "$IDENTITY" "$APP"
     else
-        echo "note: no \"$IDENTITY\" certificate; signing ad-hoc (run scripts/make-cert.sh)"
+        echo "note: no signing certificate found; signing ad-hoc (run scripts/make-cert.sh)"
         codesign --force --sign - "$APP"
     fi
 fi

@@ -3,7 +3,7 @@ import SwiftUI
 import SwisswitchCore
 
 /// Liquid Glass overlay listing every switchable app, grouped by key, in the
-/// order Right ⌘ + key visits them. Shown while Right ⌘ is held.
+/// order trigger key + key visits them. Shown while the trigger key is held.
 @MainActor
 final class AppPreview {
     struct Tile: Identifiable {
@@ -34,7 +34,7 @@ final class AppPreview {
     }
 
     /// Shows the preview; with `autoHide`, it fades out on its own after that long.
-    func show(_ apps: [SwitchableApp], autoHide: Duration? = nil) {
+    func show(_ apps: [SwitchableApp], trigger: TriggerKey, autoHide: Duration? = nil) {
         let byPID = Dictionary(apps.map { ($0.candidate.pid, $0.app) }, uniquingKeysWith: { a, _ in a })
         let tiles = groupedApps(apps.map(\.candidate)).map { group in
             Tile(letter: group.letter, apps: group.apps.prefix(Self.maxIcons + 1).map {
@@ -48,6 +48,7 @@ final class AppPreview {
         }
         hideTask?.cancel()
         panel.orderFrontRegardless()
+        model.trigger = trigger
         withAnimation(.spring(duration: 0.4, bounce: 0.25)) { model.tiles = tiles }
         if let autoHide {
             hideTask = Task { [weak self] in
@@ -74,6 +75,7 @@ final class AppPreview {
 @MainActor
 private final class PreviewModel {
     var tiles: [AppPreview.Tile]?
+    var trigger: TriggerKey = .default
 }
 
 private struct PreviewView: View {
@@ -84,7 +86,7 @@ private struct PreviewView: View {
             if let tiles = model.tiles {
                 GlassEffectContainer(spacing: 12) {
                     VStack(spacing: 18) {
-                        Text(tiles.isEmpty ? "No running apps" : "Right ⌘ + key")
+                        Text(tiles.isEmpty ? "No running apps" : "\(model.trigger.name) + key")
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 16)

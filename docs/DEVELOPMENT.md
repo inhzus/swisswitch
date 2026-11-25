@@ -15,9 +15,12 @@ swift scripts/make-icon.swift # regenerate Resources/AppIcon.icns and docs/icon.
 `scripts/test.sh` exists because the Command Line Tools keep the Swift Testing macro plugin
 in a folder SwiftPM doesn't search by default.
 
-macOS ties the Accessibility grant to the code signature, so an ad-hoc build loses it on
-every rebuild. Run `scripts/make-cert.sh` once to create a self-signed "swisswitch Dev"
-identity; `bundle.sh` signs with it automatically, and the grant then survives rebuilds.
+macOS ties the Accessibility grant to the bundle ID plus the signing certificate, so an
+ad-hoc build loses it on every rebuild. `bundle.sh` signs with the first identity it finds:
+"Swisswitch Release" (if it's in your keychain, local builds share the installed release's
+grant), then "swisswitch Dev", then ad-hoc. Without the release certificate, run
+`scripts/make-cert.sh` once to create the self-signed "swisswitch Dev" identity, and the
+grant then survives rebuilds. `SWISSWITCH_SIGN_IDENTITY` picks another identity.
 
 ## Data
 
@@ -42,7 +45,7 @@ send `kill -USR1 <pid>`.
 | Variable | Effect |
 | --- | --- |
 | `SWISSWITCH_HUD_HOLD_MS` | Keeps the switch HUD on screen longer |
-| `SWISSWITCH_HOLD_MS` | Overrides the Right ⌘ hold delay set in Settings |
+| `SWISSWITCH_HOLD_MS` | Overrides the trigger key hold delay set in Settings |
 | `SWISSWITCH_USAGE_FILE` | Points usage stats at another file |
 | `SWISSWITCH_DEFAULTS_SUITE` | Stores key assignments in another defaults domain |
 | `SWISSWITCH_LOG_FILE` | Writes the log to another file (archives go next to it) |
@@ -51,7 +54,7 @@ send `kill -USR1 <pid>`.
 
 - [ ] Launching apps that aren't running
 - [ ] Hiding the front app when its letter is pressed again
-- [ ] Configurable trigger key (Caps Lock, fn, Right ⌥, …)
+- [x] Configurable trigger key (Right ⌘, ⌥, ⌃ or ⇧)
 - [ ] Cycling through windows of the same app
 
 ## Releasing
@@ -79,8 +82,7 @@ macOS ties the Accessibility grant to the bundle ID plus this certificate, so th
 survives upgrades. **Don't replace the certificate:** a new one, or a release without
 the secrets (signed ad-hoc), makes every user grant Accessibility again.
 
-To sign a local build the way releases are signed, run
-`SWISSWITCH_SIGN_IDENTITY="Swisswitch Release" scripts/bundle.sh`. To restore the secrets
+Local builds are signed with it automatically when it's in your keychain. To restore the secrets
 from the backup, export the certificate from Keychain Access (File → Export Items as
 `.p12`), then:
 

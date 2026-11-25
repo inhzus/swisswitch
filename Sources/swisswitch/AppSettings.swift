@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import ServiceManagement
 
 extension UserDefaults {
@@ -24,16 +25,27 @@ final class AppSettings {
         static let showHUD = "showHUD"
         static let previewEnabled = "previewEnabled"
         static let previewDelay = "previewDelay"
+        static let triggerKey = "triggerKey"
     }
 
     @ObservationIgnored private let defaults = UserDefaults.swisswitch
 
     /// Show the switch HUD after each switch.
     var showHUD: Bool { didSet { persist(showHUD, Key.showHUD) } }
-    /// Show the app preview while Right ⌘ is held alone.
+    /// Show the app preview while the trigger key is held alone.
     var previewEnabled: Bool { didSet { persist(previewEnabled, Key.previewEnabled) } }
-    /// Seconds Right ⌘ must be held before the preview appears.
+    /// Seconds the trigger key must be held before the preview appears.
     var previewDelay: Double { didSet { persist(previewDelay, Key.previewDelay) } }
+    /// The modifier that, with a letter or digit, switches apps.
+    var triggerKey: TriggerKey {
+        didSet {
+            persist(triggerKey.rawValue, Key.triggerKey)
+            let trigger = triggerKey
+            triggerState.withLock { $0 = trigger }
+        }
+    }
+    /// `triggerKey`, mirrored for the event tap thread.
+    @ObservationIgnored let triggerState: OSAllocatedUnfairLock<TriggerKey>
 
     /// Login-item state, refreshed from the system.
     private(set) var loginStatus: SMAppService.Status = .notRegistered
@@ -43,6 +55,9 @@ final class AppSettings {
         showHUD = defaults.object(forKey: Key.showHUD) as? Bool ?? true
         previewEnabled = defaults.object(forKey: Key.previewEnabled) as? Bool ?? true
         previewDelay = defaults.object(forKey: Key.previewDelay) as? Double ?? 1
+        let trigger = defaults.string(forKey: Key.triggerKey).flatMap(TriggerKey.init) ?? .default
+        triggerState = OSAllocatedUnfairLock(initialState: trigger)
+        triggerKey = trigger
         refreshLogin()
     }
 

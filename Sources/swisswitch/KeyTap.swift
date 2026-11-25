@@ -3,9 +3,10 @@ import CoreGraphics
 import os
 import SwisswitchCore
 
-/// Global keyboard tap that reports Right ⌘ + letter or digit (swallowing those
+/// Global keyboard tap that reports trigger key + letter or digit (swallowing those
 /// events; digits only when some app is assigned that digit)
-/// and Right ⌘ held on its own for `holdDelay` (never swallowed).
+/// and the trigger key held on its own for `holdDelay` (never swallowed).
+/// The trigger is a right-hand modifier (`TriggerKey`); its left twin never triggers.
 ///
 /// The tap is an active filter, so every key event system-wide waits for its
 /// callback. The callback therefore runs on a dedicated high-priority thread and
@@ -20,13 +21,16 @@ final class KeyTap {
     private var holdTimer: Task<Void, Never>?
     private var holding = false
     private let assignedDigits: OSAllocatedUnfairLock<Set<Character>>
-    /// How long Right ⌘ must be held alone to show the preview; read each time.
+    private let trigger: OSAllocatedUnfairLock<TriggerKey>
+    /// How long the trigger key must be held alone to show the preview; read each time.
     private let holdDelay: () -> Duration
 
     init(assignedDigits: OSAllocatedUnfairLock<Set<Character>>,
+         trigger: OSAllocatedUnfairLock<TriggerKey>,
          holdDelay: @escaping () -> Duration,
          onLetter: @escaping (Character) -> Void, onHold: @escaping (Bool) -> Void) {
         self.assignedDigits = assignedDigits
+        self.trigger = trigger
         self.holdDelay = holdDelay
         self.onLetter = onLetter
         self.onHold = onHold
@@ -37,6 +41,7 @@ final class KeyTap {
         guard context == nil else { return true }
         let layoutMap = KeyboardLayoutMap()
         let context = TapContext(assignedDigits: assignedDigits,
+                                 trigger: trigger,
                                  layout: layoutMap.table) { [weak self] signal in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.receive(signal) }
@@ -77,8 +82,8 @@ final class KeyTap {
         }
     }
 
-    /// Arms the hold timer when Right ⌘ goes down alone; any other modifier
-    /// change cancels it, and releasing Right ⌘ ends a hold in progress.
+    /// Arms the hold timer when the trigger key goes down alone; any other modifier
+    /// change cancels it, and releasing the trigger key ends a hold in progress.
     private func flagsChanged(rightDown: Bool, alone: Bool) {
         if alone && !holding {
             guard holdTimer == nil else { return }
@@ -110,7 +115,7 @@ final class KeyTap {
 
 /// What the tap thread tells the main actor.
 private enum TapSignal: Sendable {
-    /// A key went down; `letter` is set for a (non-repeat) Right ⌘ + key trigger.
+    /// A key went down; `letter` is set for a (non-repeat) trigger key + key press.
     case keyDown(letter: Character?)
     case flags(rightDown: Bool, alone: Bool)
     case reenabled(timeout: Bool)
@@ -121,13 +126,16 @@ private final class TapContext: @unchecked Sendable {
     /// Set once before the tap thread starts, read only afterwards.
     var port: CFMachPort?
     let assignedDigits: OSAllocatedUnfairLock<Set<Character>>
+    let trigger: OSAllocatedUnfairLock<TriggerKey>
     let layout: KeyTable
     let deliver: @Sendable (TapSignal) -> Void
 
     init(assignedDigits: OSAllocatedUnfairLock<Set<Character>>,
+         trigger: OSAllocatedUnfairLock<TriggerKey>,
          layout: KeyTable,
          deliver: @escaping @Sendable (TapSignal) -> Void) {
         self.assignedDigits = assignedDigits
+        self.trigger = trigger
         self.layout = layout
         self.deliver = deliver
     }
@@ -150,24 +158,18 @@ private final class TapThread: Thread, @unchecked Sendable {
     }
 }
 
-/// `NX_DEVICERCMDKEYMASK` / `NX_DEVICELCMDKEYMASK` from IOKit's IOLLEvent.h:
-/// set only while the right / left Command key is down.
-private let rightCommandMask: UInt64 = 0x10
-private let leftCommandMask: UInt64 = 0x08
-private let otherModifiers: CGEventFlags = [.maskShift, .maskAlternate, .maskControl]
-
-/// The lowercase a–z letter or 0–9 digit when `event` is Right ⌘ + that key
-/// with no other modifiers.
+/// The lowercase a–z letter or 0–9 digit when `event` is the (right) trigger key
+/// + that key with no other modifiers.
 ///
 /// Runs on the tap thread, so it must not touch AppKit or Text Input Sources
 /// (`NSEvent.charactersIgnoringModifiers` asserts the main queue and traps);
 /// the character comes from the table `KeyboardLayoutMap` builds on main.
-private func triggerKey(of event: CGEvent,
+private func triggerKey(of event: CGEvent, trigger: TriggerKey,
                         layout: KeyTable) -> Character? {
     let flags = event.flags
-    guard flags.contains(.maskCommand),
-          flags.rawValue & rightCommandMask != 0,
-          flags.isDisjoint(with: otherModifiers)
+    guard flags.contains(trigger.flag),
+          flags.rawValue & trigger.rightMask != 0,
+          flags.isDisjoint(with: trigger.otherModifiers)
     else { return nil }
     let code = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
     return layout.withLock { $0[code] }
@@ -189,15 +191,17 @@ private func keyTapCallback(
         context.deliver(.reenabled(timeout: type == .tapDisabledByTimeout))
         return pass
     case .flagsChanged:
+        let trigger = context.trigger.withLock { $0 }
         let raw = event.flags.rawValue
-        let rightDown = raw & rightCommandMask != 0
-        let alone = rightDown && raw & leftCommandMask == 0
-            && event.flags.isDisjoint(with: otherModifiers)
+        let rightDown = raw & trigger.rightMask != 0
+        let alone = rightDown && raw & trigger.leftMask == 0
+            && event.flags.isDisjoint(with: trigger.otherModifiers)
         context.deliver(.flags(rightDown: rightDown, alone: alone))
         return pass
     case .keyDown:
         // Unassigned digits pass through, so apps keep their ⌘1…⌘9 shortcuts.
-        guard let letter = triggerKey(of: event, layout: context.layout),
+        let trigger = context.trigger.withLock { $0 }
+        guard let letter = triggerKey(of: event, trigger: trigger, layout: context.layout),
               letter.isLetter || context.assignedDigits.withLock({ $0.contains(letter) })
         else {
             context.deliver(.keyDown(letter: nil))

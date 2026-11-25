@@ -45,8 +45,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     private func makeWindow() -> NSWindow {
         let panes = SettingsPanes(panes: [
-            pane("General", symbol: "gearshape", height: 385, GeneralView(settings: settings, model: model)),
-            pane("Keys", symbol: "keyboard", height: 560, KeysView(model: model)),
+            pane("General", symbol: "gearshape", height: 440, GeneralView(settings: settings, model: model)),
+            pane("Keys", symbol: "keyboard", height: 560, KeysView(model: model, settings: settings)),
         ])
         let window = NSWindow(contentViewController: panes)
         window.styleMask = [.titled, .closable, .miniaturizable]
@@ -339,15 +339,24 @@ private struct GeneralView: View {
                 loginFooter
             }
 
-            Section("Switching") {
+            Section {
+                Picker("Trigger key", selection: $settings.triggerKey) {
+                    ForEach(TriggerKey.allCases) { Text($0.name).tag($0) }
+                }
                 Toggle("Show app name when switching", isOn: $settings.showHUD)
-                Toggle("Hold Right ⌘ to preview apps", isOn: $settings.previewEnabled)
+                Toggle("Hold \(settings.triggerKey.name) to preview apps", isOn: $settings.previewEnabled)
                 Picker("Preview delay", selection: $settings.previewDelay) {
                     ForEach(AppSettings.previewDelays, id: \.self) { delay in
                         Text("\(delay.formatted()) s").tag(delay)
                     }
                 }
                 .disabled(!settings.previewEnabled)
+            } header: {
+                Text("Switching")
+            } footer: {
+                if let caveat = settings.triggerKey.caveat {
+                    Text(caveat).foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -399,6 +408,7 @@ private struct GeneralView: View {
 
 private struct KeysView: View {
     @Bindable var model: SettingsModel
+    let settings: AppSettings
 
     var body: some View {
         let rows = model.filteredRows
@@ -417,7 +427,7 @@ private struct KeysView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(model.recording != nil
                          ? "Press a letter or digit · ⌫ No key · esc Cancel"
-                         : "Right ⌘ + key switches apps. Apps sharing a key take turns.")
+                         : "\(settings.triggerKey.name) + key switches apps. Apps sharing a key take turns.")
                         .font(.callout)
                         .foregroundStyle(model.recording != nil ? Color.accentColor : .secondary)
                     Spacer()
