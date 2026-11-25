@@ -8,16 +8,9 @@ import SwisswitchCore
 /// 'subsystem == "io.zunish.Swisswitch"'`), and to stderr when run from a terminal.
 /// SWISSWITCH_LOG_FILE points the file at another path.
 enum Log {
-    static let file: RollingLog = {
-        let url: URL
-        if let path = ProcessInfo.processInfo.environment["SWISSWITCH_LOG_FILE"] {
-            url = URL(fileURLWithPath: path)
-        } else {
-            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            url = support.appending(path: "swisswitch/logs/swisswitch.log")
-        }
-        return RollingLog(fileURL: url, maxBytes: 1 << 20, maxArchives: 3)
-    }()
+    static let file = RollingLog(
+        fileURL: .swisswitchSupportFile("logs/swisswitch.log", override: "SWISSWITCH_LOG_FILE"),
+        maxBytes: 1 << 20, maxArchives: 3)
 
     private static let system = Logger(subsystem: "io.zunish.Swisswitch", category: "app")
     private static let toTerminal = isatty(STDERR_FILENO) != 0
@@ -29,13 +22,25 @@ enum Log {
     private static func write(_ level: LogLevel, _ message: String) {
         file.write(level, message)
         switch level {
-        case .info: system.info("\(message, privacy: .public)")
+        // `.notice`, not `.info`: info messages aren't persisted and `log stream`
+        // hides them by default.
+        case .info: system.notice("\(message, privacy: .public)")
         case .warning: system.warning("\(message, privacy: .public)")
         case .error: system.error("\(message, privacy: .public)")
         }
         if toTerminal {
             FileHandle.standardError.write(Data("[swisswitch] \(level.rawValue) \(message)\n".utf8))
         }
+    }
+
+    /// Logs the version, process and OS this run started with.
+    static func launched() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "dev"
+        let build = info["CFBundleVersion"] as? String ?? "-"
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        Log.info("launched swisswitch \(version) (\(build)), pid \(getpid()), macOS \(os), "
+            + "at \(Bundle.main.bundlePath)")
     }
 
     /// Logs Objective-C exceptions that would otherwise only reach the crash report.

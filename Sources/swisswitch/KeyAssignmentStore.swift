@@ -37,7 +37,7 @@ final class KeyAssignmentStore {
             guard let key = triggerKey(for: key) else { return }
             entries[id] = String(key)
         }
-        Log.info("key assignment: \(id) → \(entries[id].map { $0.isEmpty ? "none" : $0 } ?? "automatic")")
+        Log.info("key assignment: \(id) → \(assignment.logDescription)")
         save()
     }
 
@@ -59,5 +59,15 @@ final class KeyAssignmentStore {
     private func publishDigits() {
         let digits = Set(entries.values.compactMap(\.first).filter(\.isNumber))
         assignedDigits.withLock { $0 = digits }
+    }
+}
+
+extension KeyAssignment {
+    var logDescription: String {
+        switch self {
+        case .automatic: "automatic"
+        case .none: "none"
+        case .key(let key): String(key)
+        }
     }
 }

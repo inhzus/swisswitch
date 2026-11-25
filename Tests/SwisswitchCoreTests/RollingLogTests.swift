@@ -1,11 +1,16 @@
 import Foundation
 import Testing
-@testable import SwisswitchCore
+import SwisswitchCore
 
 private func tempLog(maxBytes: Int, maxArchives: Int) -> RollingLog {
     let dir = FileManager.default.temporaryDirectory
         .appending(path: "RollingLogTests-\(UUID().uuidString)/nested")
     return RollingLog(fileURL: dir.appending(path: "app.log"), maxBytes: maxBytes, maxArchives: maxArchives)
+}
+
+/// Removes the `RollingLogTests-*` folder `tempLog` made.
+private func removeTempFolder(of log: RollingLog) {
+    try? FileManager.default.removeItem(at: log.fileURL.deletingLastPathComponent().deletingLastPathComponent())
 }
 
 private func contents(_ url: URL) -> String? {
@@ -14,6 +19,7 @@ private func contents(_ url: URL) -> String? {
 
 @Test func writesTimestampedLinesAndCreatesFolder() throws {
     let log = tempLog(maxBytes: 1000, maxArchives: 1)
+    defer { removeTempFolder(of: log) }
     log.write(.info, "hello")
     log.write(.error, "boom")
     let lines = try #require(contents(log.fileURL)).split(separator: "\n")
@@ -29,6 +35,7 @@ private func contents(_ url: URL) -> String? {
 
 @Test func rollsOverAndKeepsAtMostMaxArchives() throws {
     let log = tempLog(maxBytes: 100, maxArchives: 2)
+    defer { removeTempFolder(of: log) }
     let fm = FileManager.default
     for i in 0..<20 { log.write(.info, "line \(i) " + String(repeating: "x", count: 30)) }
 
@@ -45,6 +52,7 @@ private func contents(_ url: URL) -> String? {
 
 @Test func appendsToExistingFileAcrossInstances() throws {
     let first = tempLog(maxBytes: 1000, maxArchives: 1)
+    defer { removeTempFolder(of: first) }
     first.write(.info, "one")
     let second = RollingLog(fileURL: first.fileURL, maxBytes: 1000, maxArchives: 1)
     second.write(.warning, "two")
@@ -54,6 +62,7 @@ private func contents(_ url: URL) -> String? {
 
 @Test func rollsOverAnOversizedFileFromAPreviousRun() throws {
     let first = tempLog(maxBytes: 50, maxArchives: 1)
+    defer { removeTempFolder(of: first) }
     first.write(.info, String(repeating: "y", count: 80))
     let second = RollingLog(fileURL: first.fileURL, maxBytes: 50, maxArchives: 1)
     second.write(.info, "fresh")
@@ -63,6 +72,7 @@ private func contents(_ url: URL) -> String? {
 
 @Test func zeroArchivesTruncates() throws {
     let log = tempLog(maxBytes: 60, maxArchives: 0)
+    defer { removeTempFolder(of: log) }
     log.write(.info, "first " + String(repeating: "a", count: 30))
     log.write(.info, "second " + String(repeating: "b", count: 30))
     let text = try #require(contents(log.fileURL))

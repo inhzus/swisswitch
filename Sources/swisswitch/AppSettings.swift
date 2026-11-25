@@ -20,36 +20,35 @@ extension UserDefaults {
 final class AppSettings {
     static let previewDelays: [Double] = [0.5, 0.75, 1, 1.5, 2]
 
+    private enum Key {
+        static let showHUD = "showHUD"
+        static let previewEnabled = "previewEnabled"
+        static let previewDelay = "previewDelay"
+    }
+
     @ObservationIgnored private let defaults = UserDefaults.swisswitch
 
     /// Show the switch HUD after each switch.
-    var showHUD: Bool {
-        didSet { defaults.set(showHUD, forKey: "showHUD"); Log.info("setting: HUD \(showHUD)") }
-    }
+    var showHUD: Bool { didSet { persist(showHUD, Key.showHUD) } }
     /// Show the app preview while Right ⌘ is held alone.
-    var previewEnabled: Bool {
-        didSet {
-            defaults.set(previewEnabled, forKey: "previewEnabled")
-            Log.info("setting: preview \(previewEnabled)")
-        }
-    }
+    var previewEnabled: Bool { didSet { persist(previewEnabled, Key.previewEnabled) } }
     /// Seconds Right ⌘ must be held before the preview appears.
-    var previewDelay: Double {
-        didSet {
-            defaults.set(previewDelay, forKey: "previewDelay")
-            Log.info("setting: preview delay \(previewDelay)s")
-        }
-    }
+    var previewDelay: Double { didSet { persist(previewDelay, Key.previewDelay) } }
 
     /// Login-item state, refreshed from the system.
     private(set) var loginStatus: SMAppService.Status = .notRegistered
     private(set) var loginError: String?
 
     init() {
-        showHUD = defaults.object(forKey: "showHUD") as? Bool ?? true
-        previewEnabled = defaults.object(forKey: "previewEnabled") as? Bool ?? true
-        previewDelay = defaults.object(forKey: "previewDelay") as? Double ?? 1
+        showHUD = defaults.object(forKey: Key.showHUD) as? Bool ?? true
+        previewEnabled = defaults.object(forKey: Key.previewEnabled) as? Bool ?? true
+        previewDelay = defaults.object(forKey: Key.previewDelay) as? Double ?? 1
         refreshLogin()
+    }
+
+    private func persist(_ value: Any, _ key: String) {
+        defaults.set(value, forKey: key)
+        Log.info("setting: \(key) = \(value)")
     }
 
     /// The hold delay, with SWISSWITCH_HOLD_MS winning for debugging.

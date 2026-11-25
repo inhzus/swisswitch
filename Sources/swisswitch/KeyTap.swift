@@ -194,11 +194,8 @@ final class KeyboardLayoutMap {
     }
 
     func rebuild() {
-        let map = Self.currentMap()
+        let (id, map) = Self.currentMap()
         table.withLock { $0 = map }
-        let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
-        let id = source.flatMap { TISGetInputSourceProperty($0, kTISPropertyInputSourceID) }
-            .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String } ?? "?"
         if map.isEmpty {
             Log.error("keyboard layout \(id) maps no letters or digits; switching won't work")
         } else {
@@ -213,12 +210,28 @@ final class KeyboardLayoutMap {
         return Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue()
     }
 
-    private static func currentMap() -> [UInt16: Character] {
+    private static func inputSourceID(_ source: TISInputSource) -> String {
+        guard let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return "?" }
+        return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+    }
+
+    /// The ID of the layout the table came from, and the table.
+    private static func currentMap() -> (layoutID: String, map: [UInt16: Character]) {
         // Input methods (e.g. Chinese) have no layout data; fall back to the
         // ASCII-capable layout they type through.
-        let data = layoutData(TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue())
-            ?? layoutData(TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue())
-        guard let data, let bytes = CFDataGetBytePtr(data) else { return [:] }
+        for copySource in [TISCopyCurrentKeyboardLayoutInputSource,
+                           TISCopyCurrentASCIICapableKeyboardLayoutInputSource] {
+            guard let source = copySource()?.takeRetainedValue(),
+                  let data = layoutData(source)
+            else { continue }
+            return (inputSourceID(source), translate(data))
+        }
+        return ("none", [:])
+    }
+
+    /// The lowercase ASCII letter or digit each keycode types in `layoutData`.
+    private static func translate(_ layoutData: CFData) -> [UInt16: Character] {
+        guard let bytes = CFDataGetBytePtr(layoutData) else { return [:] }
         let keyboardType = UInt32(LMGetKbdType())
         var map: [UInt16: Character] = [:]
         bytes.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { layout in

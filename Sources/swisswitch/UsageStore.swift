@@ -21,12 +21,7 @@ final class UsageStore {
     private var pendingSwitch: String?
 
     init() {
-        if let path = ProcessInfo.processInfo.environment["SWISSWITCH_USAGE_FILE"] {
-            fileURL = URL(fileURLWithPath: path)
-        } else {
-            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            fileURL = support.appending(path: "swisswitch/usage.json")
-        }
+        fileURL = .swisswitchSupportFile("usage.json", override: "SWISSWITCH_USAGE_FILE")
         stats = Self.load(from: fileURL)
     }
 

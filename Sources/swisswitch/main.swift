@@ -123,10 +123,7 @@ final class AppController {
 }
 
 Log.installExceptionHandler()
-let info = Bundle.main.infoDictionary ?? [:]
-Log.info("launched swisswitch \(info["CFBundleShortVersionString"] as? String ?? "dev") "
-    + "(\(info["CFBundleVersion"] as? String ?? "-")), pid \(getpid()), "
-    + "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), at \(Bundle.main.bundlePath)")
+Log.launched()
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let controller = AppController()
