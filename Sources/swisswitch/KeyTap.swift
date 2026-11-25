@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import CoreGraphics
 import os
 import SwisswitchCore
@@ -122,11 +121,11 @@ private final class TapContext: @unchecked Sendable {
     /// Set once before the tap thread starts, read only afterwards.
     var port: CFMachPort?
     let assignedDigits: OSAllocatedUnfairLock<Set<Character>>
-    let layout: OSAllocatedUnfairLock<[UInt16: Character]>
+    let layout: KeyTable
     let deliver: @Sendable (TapSignal) -> Void
 
     init(assignedDigits: OSAllocatedUnfairLock<Set<Character>>,
-         layout: OSAllocatedUnfairLock<[UInt16: Character]>,
+         layout: KeyTable,
          deliver: @escaping @Sendable (TapSignal) -> Void) {
         self.assignedDigits = assignedDigits
         self.layout = layout
@@ -164,7 +163,7 @@ private let otherModifiers: CGEventFlags = [.maskShift, .maskAlternate, .maskCon
 /// (`NSEvent.charactersIgnoringModifiers` asserts the main queue and traps);
 /// the character comes from the table `KeyboardLayoutMap` builds on main.
 private func triggerKey(of event: CGEvent,
-                        layout: OSAllocatedUnfairLock<[UInt16: Character]>) -> Character? {
+                        layout: KeyTable) -> Character? {
     let flags = event.flags
     guard flags.contains(.maskCommand),
           flags.rawValue & rightCommandMask != 0,
@@ -172,87 +171,6 @@ private func triggerKey(of event: CGEvent,
     else { return nil }
     let code = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
     return layout.withLock { $0[code] }
-}
-
-/// Keycode → lowercase ASCII letter/digit for the current keyboard layout:
-/// the character each key types with no modifiers. Built on the main thread
-/// (TIS requires it) and rebuilt whenever the input source changes; the tap
-/// thread only reads `table`.
-@MainActor
-final class KeyboardLayoutMap {
-    nonisolated let table = OSAllocatedUnfairLock<[UInt16: Character]>(initialState: [:])
-    private var observer: NSObjectProtocol?
-
-    init() {
-        rebuild()
-        observer = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.rebuild() }
-        }
-    }
-
-    func rebuild() {
-        let (id, map) = Self.currentMap()
-        table.withLock { $0 = map }
-        if map.isEmpty {
-            Log.error("keyboard layout \(id) maps no letters or digits; switching won't work")
-        } else {
-            Log.info("keyboard layout \(id): \(map.count) keys mapped")
-        }
-    }
-
-    private static func layoutData(_ source: TISInputSource?) -> CFData? {
-        guard let source,
-              let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
-        else { return nil }
-        return Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue()
-    }
-
-    private static func inputSourceID(_ source: TISInputSource) -> String {
-        guard let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return "?" }
-        return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
-    }
-
-    /// The ID of the layout the table came from, and the table.
-    private static func currentMap() -> (layoutID: String, map: [UInt16: Character]) {
-        // Input methods (e.g. Chinese) have no layout data; fall back to the
-        // ASCII-capable layout they type through.
-        for copySource in [TISCopyCurrentKeyboardLayoutInputSource,
-                           TISCopyCurrentASCIICapableKeyboardLayoutInputSource] {
-            guard let source = copySource()?.takeRetainedValue(),
-                  let data = layoutData(source)
-            else { continue }
-            return (inputSourceID(source), translate(data))
-        }
-        return ("none", [:])
-    }
-
-    /// The lowercase ASCII letter or digit each keycode types in `layoutData`.
-    private static func translate(_ layoutData: CFData) -> [UInt16: Character] {
-        guard let bytes = CFDataGetBytePtr(layoutData) else { return [:] }
-        let keyboardType = UInt32(LMGetKbdType())
-        var map: [UInt16: Character] = [:]
-        bytes.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { layout in
-            for code in UInt16(0)..<128 {
-                var deadKeyState: UInt32 = 0
-                var length = 0
-                var chars = [UniChar](repeating: 0, count: 4)
-                let status = UCKeyTranslate(
-                    layout, code, UInt16(kUCKeyActionDown), 0, keyboardType,
-                    OptionBits(kUCKeyTranslateNoDeadKeysMask), &deadKeyState,
-                    chars.count, &length, &chars)
-                guard status == noErr, length > 0 else { continue }
-                let string = String(utf16CodeUnits: chars, count: length).lowercased()
-                guard string.count == 1, let char = string.first,
-                      char.isASCII, char.isLetter || char.isNumber
-                else { continue }
-                map[code] = char
-            }
-        }
-        return map
-    }
 }
 
 /// Runs on the tap thread: classify, hand off, and return immediately.

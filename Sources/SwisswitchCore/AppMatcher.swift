@@ -20,6 +20,16 @@ public func triggerKey(for character: Character) -> Character? {
     return key
 }
 
+/// The trigger key a keyboard key types, given its unmodified output: only an
+/// exact ASCII letter or digit (lowercased). Unlike `triggerKey(for:)`, accents
+/// are not folded: on a layout with an é key, that key is not the E key.
+public func triggerKey(typed: String) -> Character? {
+    let lowered = typed.lowercased()
+    guard lowered.count == 1, let key = lowered.first, key.isASCII, key.isLetter || key.isNumber
+    else { return nil }
+    return key
+}
+
 /// A running app that can be switched to.
 public struct AppCandidate: Equatable, Sendable {
     /// Display name (usually localized), used for ordering.

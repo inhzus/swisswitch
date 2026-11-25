@@ -127,3 +127,13 @@ private func assigned(_ name: String, _ pid: pid_t, _ assignment: KeyAssignment,
     #expect(triggerKey(for: "-") == nil)
     #expect(triggerKey(for: "é") == "e")
 }
+
+@Test(arguments: [("a", "a"), ("A", "a"), ("z", "z"), ("7", "7"), ("0", "0")])
+func typedLettersAndDigitsAreTriggerKeys(typed: String, expected: Character) {
+    #expect(triggerKey(typed: typed) == expected)
+}
+
+@Test(arguments: ["é", "ß", "ü", "ab", "", "-", " ", "\u{1B}"])
+func otherTypedOutputIsNotATriggerKey(typed: String) {
+    #expect(triggerKey(typed: typed) == nil)
+}
