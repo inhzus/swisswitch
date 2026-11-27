@@ -24,9 +24,9 @@ jobs:
         run: scripts/test.sh
 
       # Optional: without these secrets the build is ad-hoc signed, and users have to grant
-      # Accessibility again after every upgrade. Any code-signing identity works: a
-      # Developer ID certificate, or the self-signed "swisswitch Dev" one from
-      # scripts/make-cert.sh, which keeps the grant stable across releases.
+      # Accessibility again after every upgrade. Releases use the self-signed
+      # "Swisswitch Release" certificate (docs/DEVELOPMENT.md → Releasing); a Developer ID
+      # certificate also works and enables notarization.
       - name: Import signing certificate
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}

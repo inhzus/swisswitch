@@ -16,11 +16,11 @@ swift scripts/make-icon.swift # regenerate Resources/AppIcon.icns and docs/icon.
 in a folder SwiftPM doesn't search by default.
 
 macOS ties the Accessibility grant to the bundle ID plus the signing certificate, so an
-ad-hoc build loses it on every rebuild. `bundle.sh` signs with the first identity it finds:
-"Swisswitch Release" (if it's in your keychain, local builds share the installed release's
-grant), then "swisswitch Dev", then ad-hoc. Without the release certificate, run
-`scripts/make-cert.sh` once to create the self-signed "swisswitch Dev" identity, and the
-grant then survives rebuilds. `SWISSWITCH_SIGN_IDENTITY` picks another identity.
+ad-hoc build loses it on every rebuild. `bundle.sh` signs with "Swisswitch Release" when it's
+in your keychain, so local builds share the installed release's grant (see
+[Releasing](#releasing) to import it), and ad-hoc otherwise. To keep the grant across rebuilds
+without the release certificate, point `SWISSWITCH_SIGN_IDENTITY` at any code-signing identity
+of your own.
 
 ## Data
 
