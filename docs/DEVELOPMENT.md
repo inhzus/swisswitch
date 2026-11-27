@@ -76,20 +76,50 @@ repository secrets are optional, and each one turns on a step:
 | `NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID` | Notarization with an App Store Connect API key (contents of the `.p8`); needs a Developer ID identity |
 | `TAP_DEPLOY_KEY` | Pushing the updated cask to [`inhzus/homebrew-tap`](https://github.com/inhzus/homebrew-tap) (the private half of a deploy key with write access there) |
 
-Releases are signed with a self-signed **"Swisswitch Release"** certificate (valid until
-2046), stored in the `MACOS_CERT_*` secrets, with a backup in the maintainer's login keychain.
-macOS ties the Accessibility grant to the bundle ID plus this certificate, so the grant
-survives upgrades. **Don't replace the certificate:** a new one, or a release without
-the secrets (signed ad-hoc), makes every user grant Accessibility again.
+Releases are signed with a self-signed **"Swisswitch Release"** certificate, stored in the
+`MACOS_CERT_*` secrets. macOS ties the Accessibility grant to the bundle ID plus this
+certificate, so the grant survives upgrades. **Don't replace the certificate:** a new one, or
+a release without the secrets (signed ad-hoc), makes every user grant Accessibility again.
 
-Local builds are signed with it automatically when it's in your keychain. To restore the secrets
-from the backup, export the certificate from Keychain Access (File → Export Items as
-`.p12`), then:
+| | |
+| --- | --- |
+| Subject | `CN=Swisswitch Release` (self-signed, Code Signing only), serial `9DC4D9F36E28CEFD` |
+| Valid | 2026-11-24 to 2046-11-19 |
+| SHA-1 | `75EE883388389C11F65B70CAB4BC1B7CCD7B46BC` |
+| SHA-256 | `60FCCB91E22C83B1291F01315CE0C74809A64846DFDB8289715C9CDAA41D6B91` |
+| Backup | 1Password, Personal vault, item **"Swisswitch Release signing cert"**: the `.p12` file, and its export password in `password` |
+
+A correctly signed build shows this SHA-1 in its designated requirement:
 
 ```sh
-base64 -i swisswitch-release.p12 | gh secret set MACOS_CERT_P12
-gh secret set MACOS_CERT_PASSWORD   # the export password
+codesign -dr - /Applications/Swisswitch.app   # … certificate leaf = H"75ee8833…7b46bc"
 ```
+
+With the [1Password CLI](https://developer.1password.com/docs/cli/) signed in (`op signin`),
+these commands restore the certificate from the backup:
+
+```sh
+ITEM="Swisswitch Release signing cert"
+
+# GitHub secrets
+op document get "$ITEM" --vault Personal | base64 | gh secret set MACOS_CERT_P12
+op read "op://Personal/$ITEM/password" | gh secret set MACOS_CERT_PASSWORD
+
+# Login keychain on a new Mac (local builds then use it automatically, see Building)
+P12="$(mktemp -d)/release.p12"
+op document get "$ITEM" --vault Personal --out-file "$P12"
+security import "$P12" -k ~/Library/Keychains/login.keychain-db \
+    -P "$(op read "op://Personal/$ITEM/password")" -T /usr/bin/codesign
+rm -f "$P12"
+
+# Check the backup: should print the SHA-1 above
+op document get "$ITEM" --vault Personal |
+    openssl pkcs12 -nokeys -legacy -passin "pass:$(op read "op://Personal/$ITEM/password")" |
+    openssl x509 -noout -fingerprint -sha1
+```
+
+The `.p12` uses the legacy encryption that Keychain Access exports. OpenSSL 3 and later
+need `-legacy` to read it, and the macOS LibreSSL at `/usr/bin/openssl` reads it without the flag.
 
 The cask template is [`packaging/homebrew/swisswitch.rb`](../packaging/homebrew/swisswitch.rb).
 Once releases are notarized, drop its `postflight_steps` block and the quarantine note in
