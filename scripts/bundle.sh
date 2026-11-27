@@ -11,8 +11,7 @@
 # SWISSWITCH_SIGN_IDENTITY):
 #   1. "Swisswitch Release": the release certificate, so a local build shares the
 #      Accessibility grant of the installed release (the grant is per bundle ID + certificate)
-#   2. "swisswitch Dev": the self-signed identity from scripts/make-cert.sh
-#   3. ad-hoc, which ties the grant to this exact build
+#   2. ad-hoc, which ties the grant to this exact build
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -43,7 +42,7 @@ if [[ -n "${SIGN_IDENTITY:-}" ]]; then
     fi
 else
     IDENTITY=""
-    for candidate in ${SWISSWITCH_SIGN_IDENTITY:+"$SWISSWITCH_SIGN_IDENTITY"} "Swisswitch Release" "swisswitch Dev"; do
+    for candidate in ${SWISSWITCH_SIGN_IDENTITY:+"$SWISSWITCH_SIGN_IDENTITY"} "Swisswitch Release"; do
         if security find-certificate -c "$candidate" >/dev/null 2>&1; then
             IDENTITY="$candidate"
             break
@@ -53,7 +52,7 @@ else
         echo "signing with \"$IDENTITY\""
         codesign --force --sign "$IDENTITY" "$APP"
     else
-        echo "note: no signing certificate found; signing ad-hoc (run scripts/make-cert.sh)"
+        echo "note: \"Swisswitch Release\" not in keychain; signing ad-hoc (set SWISSWITCH_SIGN_IDENTITY to use another identity)"
         codesign --force --sign - "$APP"
     fi
 fi
